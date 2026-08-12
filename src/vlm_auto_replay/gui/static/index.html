@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>VLM Auto Replay — Control Panel</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <header class="topnav">
+    <div class="brand">VLM <span class="chip-lime">AUTO</span> REPLAY</div>
+    <div class="eyebrow" id="status-pill">STATUS: IDLE</div>
+  </header>
+
+  <main class="layout">
+    <section class="panel">
+      <h2 class="panel-title">ゴール分解</h2>
+      <p class="caption">達成したい目標を入力すると、TODOに分解します(decompose_goal_to_todo)。</p>
+      <div class="row">
+        <input id="goal-input" class="text-input" type="text" placeholder="例: ボスを撃破する" />
+        <button id="decompose-btn" class="btn-primary">分解する</button>
+      </div>
+      <div id="todo-list" class="todo-list"></div>
+    </section>
+
+    <section class="panel">
+      <h2 class="panel-title">実行ログ(StepLog)</h2>
+      <p class="caption">capture → generate_next_action → execute → summarize の1ステップごとに記録される。</p>
+      <div class="row">
+        <button id="stop-btn" class="btn-ghost" disabled>停止</button>
+        <span id="run-error" class="error-text"></span>
+      </div>
+      <div id="log-feed" class="log-feed"></div>
+    </section>
+
+    <section class="panel">
+      <h2 class="panel-title">スキルライブラリ</h2>
+      <div id="skill-list" class="skill-list"></div>
+    </section>
+
+    <section class="panel">
+      <h2 class="panel-title">Watchdog</h2>
+      <p class="caption" id="watchdog-info"></p>
+    </section>
+  </main>
+
+  <script src="/app.js"></script>
+</body>
+</html>
