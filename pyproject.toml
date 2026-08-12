@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vlm-auto-replay-tool"
+version = "0.1.0"
+description = "基盤モデルによる計画と専用モデルによる実行を分離したゲーム自動プレイエージェント(コア骨格実装: Phase1-5)"
+requires-python = ">=3.11"
+dependencies = [
+    "pydantic>=2.6",
+    "requests>=2.31",
+]
+
+[project.optional-dependencies]
+# Windows実機HID実行(Phase3)。ViGEmBusドライバのインストールが別途必要。
+hid = ["vgamepad>=0.0.8"]
+# 画面キャプチャ・OCRの実バックエンド(Phase3/7)。
+vision = ["mss>=9.0", "pillow>=10.0"]
+# 操作用GUI(FastAPIダッシュボード)。
+gui = ["fastapi>=0.110", "uvicorn>=0.29"]
+dev = ["pytest>=8.0", "fastapi>=0.110", "uvicorn>=0.29", "httpx>=0.27"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
