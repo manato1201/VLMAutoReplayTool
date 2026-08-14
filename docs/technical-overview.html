@@ -1,0 +1,482 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>VLMAutoReplayTool 技術解説書</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Rubik:wght@400;500;600;700&display=swap">
+<style>
+  :root {
+    --primary: #150f23;
+    --ink-deep: #1f1633;
+    --on-primary: #ffffff;
+    --accent-lime: #c2ef4e;
+    --accent-pink: #fa7faa;
+    --accent-violet-deep: #422082;
+    --accent-violet-mid: #79628c;
+    --surface-night: #150f23;
+    --surface-canvas-dark: #1f1633;
+    --hairline-violet: #362d59;
+    --on-dark-muted: rgba(255,255,255,0.72);
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--surface-night);
+    color: var(--on-primary);
+    font-family: "Rubik", -apple-system, system-ui, "Segoe UI", Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+  }
+  header.hero {
+    padding: 64px 24px 48px;
+    background: var(--surface-canvas-dark);
+    border-bottom: 1px solid var(--hairline-violet);
+  }
+  header.hero .eyebrow {
+    text-transform: uppercase;
+    font-size: 15px;
+    letter-spacing: 0.2px;
+    color: var(--on-dark-muted);
+    margin-bottom: 8px;
+  }
+  header.hero h1 {
+    font-size: 44px;
+    font-weight: 700;
+    margin: 0 0 12px;
+    max-width: 900px;
+  }
+  header.hero .chip-lime {
+    background: var(--accent-lime);
+    color: var(--ink-deep);
+    border-radius: 4px;
+    padding: 0 12px;
+  }
+  header.hero p {
+    max-width: 760px;
+    color: var(--on-dark-muted);
+    font-size: 16px;
+  }
+  header.hero a {
+    color: var(--accent-lime);
+  }
+  .layout {
+    display: grid;
+    grid-template-columns: 240px 1fr;
+    max-width: 1152px;
+    margin: 0 auto;
+    gap: 32px;
+    padding: 32px 24px 96px;
+  }
+  @media (max-width: 900px) {
+    .layout { grid-template-columns: 1fr; }
+    nav.toc { position: static !important; }
+  }
+  nav.toc {
+    position: sticky;
+    top: 24px;
+    align-self: start;
+    background: var(--ink-deep);
+    border: 1px solid var(--hairline-violet);
+    border-radius: 12px;
+    padding: 16px;
+    font-size: 14px;
+  }
+  nav.toc div.eyebrow {
+    text-transform: uppercase;
+    font-size: 12px;
+    letter-spacing: 0.2px;
+    color: var(--on-dark-muted);
+    margin-bottom: 8px;
+  }
+  nav.toc a {
+    display: block;
+    color: var(--on-primary);
+    text-decoration: none;
+    padding: 6px 0;
+    border-bottom: 1px solid transparent;
+  }
+  nav.toc a:hover { color: var(--accent-lime); }
+  main { min-width: 0; }
+  section {
+    background: var(--ink-deep);
+    border: 1px solid var(--hairline-violet);
+    border-radius: 18px;
+    padding: 32px;
+    margin-bottom: 24px;
+  }
+  section h2 {
+    font-size: 27px;
+    font-weight: 500;
+    margin-top: 0;
+    border-bottom: 1px solid var(--hairline-violet);
+    padding-bottom: 12px;
+  }
+  section h3 {
+    font-size: 20px;
+    font-weight: 600;
+    color: var(--accent-lime);
+  }
+  code {
+    font-family: "Monaco", "Menlo", "Ubuntu Mono", monospace;
+    background: var(--surface-night);
+    border-radius: 4px;
+    padding: 2px 6px;
+    font-size: 14px;
+  }
+  pre.codeblock {
+    font-family: "Monaco", "Menlo", "Ubuntu Mono", monospace;
+    background: var(--surface-night);
+    border: 1px solid var(--hairline-violet);
+    border-radius: 8px;
+    padding: 16px;
+    overflow-x: auto;
+    font-size: 14px;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14px;
+    margin: 16px 0;
+    display: block;
+    overflow-x: auto;
+  }
+  th, td {
+    text-align: left;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--hairline-violet);
+    vertical-align: top;
+  }
+  th { color: var(--accent-lime); font-weight: 600; }
+  .mermaid-wrap {
+    background: var(--surface-night);
+    border: 1px solid var(--hairline-violet);
+    border-radius: 12px;
+    padding: 16px;
+    margin: 16px 0;
+    overflow-x: auto;
+  }
+  .pill {
+    display: inline-block;
+    background: var(--surface-night);
+    border: 1px solid var(--hairline-violet);
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-size: 14px;
+    color: var(--on-dark-muted);
+  }
+  footer {
+    text-align: center;
+    color: var(--on-dark-muted);
+    font-size: 14px;
+    padding: 32px;
+  }
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="eyebrow">TECHNICAL OVERVIEW</div>
+  <h1>VLM<span class="chip-lime">Auto</span>ReplayTool 技術解説書</h1>
+  <p>
+    「計画(基盤モデル)」と「実行(専用モデル・スキル・API)」を分離したゲーム自動プレイエージェントの実装リファレンス。
+    設計の一次情報は <a href="../VLMAutoReplayTool_DESIGN.md">VLMAutoReplayTool_DESIGN.md</a>(Phase0〜7)。
+    本書はそれを現在のコード(<code>src/</code>)に即して説明する。Markdown版:
+    <a href="TECHNICAL_OVERVIEW.md">TECHNICAL_OVERVIEW.md</a>
+  </p>
+</header>
+
+<div class="layout">
+  <nav class="toc">
+    <div class="eyebrow">目次</div>
+    <a href="#overview">1. 全体像</a>
+    <a href="#dirs">2. ディレクトリ構成</a>
+    <a href="#phase1">3. Phase1 プロンプト層</a>
+    <a href="#phase2">4. Phase2 MainLoop</a>
+    <a href="#phase3">5. Phase3 Action実行層</a>
+    <a href="#phase4">6. Phase4 RAG境界</a>
+    <a href="#phase5">7. Phase5 Watchdog</a>
+    <a href="#phase67">8. Phase6/7 R&D</a>
+    <a href="#gui">9. GUI</a>
+    <a href="#tests">10. テスト戦略</a>
+    <a href="#swap">11. 差し替えポイント</a>
+  </nav>
+
+  <main>
+
+  <section id="overview">
+    <h2>1. 全体像</h2>
+    <p>中核ループは <code>capture → generate_next_action → execute → 状態変化確認 → repeat</code> という単純な形を保ち、各ステップの行動理由(reasoning)を必ず記録する。</p>
+    <div class="mermaid-wrap"><pre class="mermaid">
+flowchart TB
+    subgraph Plan["計画(基盤モデル / Phase1)"]
+        FM["FoundationModelClient\n(9関数)"]
+    end
+    subgraph Core["コアエンジン(Phase2/5)"]
+        ML["MainLoop\ncapture→action→execute→summarize"]
+        WD["Watchdog\n二重条件でTODO再構築"]
+    end
+    subgraph Exec["実行層(Phase3)"]
+        AD["ActionDispatcher"]
+        SK["SkillRunner"]
+        API["ApiPrimitives"]
+        HID["ViGEm / SendInput"]
+    end
+    subgraph Know["知識ソース(Phase4)"]
+        RAG["VLMReplayRagClient :8766"]
+    end
+    subgraph RD["R&amp;D(Phase6/7)"]
+        SKX["skills/extraction.py"]
+        NAV["navigation/localizer.py"]
+    end
+    GUI["GUIダッシュボード(FastAPI)"] --> ML
+    RAG -->|"TODO生成の前段のみ"| FM
+    FM --> ML
+    ML --> WD
+    WD -->|"rebuild_todo"| FM
+    ML --> AD
+    AD --> SK
+    AD --> API
+    SK --> API
+    API --> HID
+    ML -.->|"セッションログ"| SKX
+    ML -.->|"画面キャプチャ"| NAV
+    </pre></div>
+    <p><strong>アーキテクチャ境界(最重要)</strong>: <code>generate_next_action</code> を含む <code>prompts/functions.py</code> は <code>knowledge.rag_client</code> を一切importしない。1ステップの実行サイクルではRAG呼び出しが物理的に0回になる(<code>tests/test_rag_boundary.py</code> でAST静的解析により実証)。</p>
+  </section>
+
+  <section id="dirs">
+    <h2>2. ディレクトリとPhaseの対応</h2>
+    <table>
+      <tr><th>ディレクトリ</th><th>対応Phase</th><th>役割</th><th>実装状態</th></tr>
+      <tr><td><code>prompts/</code></td><td>Phase1</td><td>9つのプロンプト意図を型付き関数として固定</td><td>フル実装</td></tr>
+      <tr><td><code>loop/</code></td><td>Phase2, 5</td><td>MainLoop・StepLog・Watchdog</td><td>フル実装</td></tr>
+      <tr><td><code>actions/</code></td><td>Phase3</td><td>Skill・API primitive・HID・サンドボックス</td><td>フル実装(HIDは実機ドライバ依存)</td></tr>
+      <tr><td><code>knowledge/</code></td><td>Phase4</td><td>RAGクライアント・Experience</td><td>フル実装</td></tr>
+      <tr><td><code>skills/</code></td><td>Phase6</td><td>スキル自動抽出・受け入れゲート</td><td>軽量実装</td></tr>
+      <tr><td><code>navigation/</code></td><td>Phase7</td><td>視覚的自己位置推定</td><td>軽量実装</td></tr>
+      <tr><td><code>gui/</code></td><td>—</td><td>操作用Webダッシュボード</td><td>フル実装</td></tr>
+    </table>
+  </section>
+
+  <section id="phase1">
+    <h2>3. Phase1: プロンプトテンプレート層</h2>
+    <p>9関数はモジュールレベルの <code>get_model_client()</code> のみを経由してモデルを呼び出す。<code>configure_model_client()</code> で実装を差し替えても呼び出し側コードは一切変更不要。</p>
+    <div class="mermaid-wrap"><pre class="mermaid">
+classDiagram
+    class FoundationModelClient {
+        &lt;&lt;Protocol&gt;&gt;
+        +complete(task, payload, images, response_model)
+    }
+    class ScriptedFoundationModelClient { +queue() +complete() +calls }
+    class DemoModelClient { +complete() }
+    FoundationModelClient <|.. ScriptedFoundationModelClient
+    FoundationModelClient <|.. DemoModelClient
+    class functions_py {
+        +decompose_goal_to_todo()
+        +generate_next_action()
+        +explain_action_choice()
+    }
+    functions_py --> FoundationModelClient : get_model_client()
+    </pre></div>
+  </section>
+
+  <section id="phase2">
+    <h2>4. Phase2: MainLoop + StepLog</h2>
+    <div class="mermaid-wrap"><pre class="mermaid">
+sequenceDiagram
+    participant Loop as MainLoop.run()
+    participant Cap as ScreenCapture
+    participant FM as FoundationModelClient
+    participant Exec as ActionExecutor
+    participant WD as Watchdog
+    participant Sink as StepLogSink
+
+    loop 1ステップ
+        Loop->>Cap: capture()
+        Cap-->>Loop: observation(before)
+        Loop->>FM: generate_next_action(todo, obs, history)
+        FM-->>Loop: NextActionOutput
+        Loop->>FM: explain_action_choice(action, context)
+        FM-->>Loop: reasoning
+        Loop->>Exec: execute(action)
+        Loop->>Cap: capture()
+        Cap-->>Loop: observation(after)
+        Loop->>FM: summarize_screen_change(before, after)
+        FM-->>Loop: resultObservationSummary
+        Loop->>Sink: log_step(StepLog)
+        Loop->>WD: should_intervene(todo, logs)
+        alt 介入すべき
+            WD-->>Loop: true
+            Loop->>Loop: break
+        else 継続
+            WD-->>Loop: false
+        end
+    end
+    </pre></div>
+    <p><code>StepLog</code>は7フィールドを毎ステップ非nullで持つ。固定ディレイに依存せず、<code>resultObservationSummary</code>の生成後にのみ進行判定を行う(<code>main_loop.py</code>にsleep呼び出しは存在しない)。</p>
+  </section>
+
+  <section id="phase3">
+    <h2>5. Phase3: Action実行層(Skill/API二層+HID)</h2>
+    <div class="mermaid-wrap"><pre class="mermaid">
+flowchart TD
+    NA["NextActionOutput"] --> DP{ActionDispatcher}
+    DP -->|"api"| API["ApiPrimitives"]
+    DP -->|"skill(script)"| SB["ScriptSandbox.execute()"]
+    DP -->|"skill(procedure)"| ERR["ValueError\n1ステップ実行不可"]
+    API --> PAD["ViGEmPadBackend"]
+    API --> KM["SendInputBackend"]
+    API --> OCR["OcrBackend"]
+    subgraph Proc["procedureスキルは独立TODOとして起動"]
+        SR["SkillRunner.run_procedure_skill()"] --> ML2["MainLoop.run(guidance_text=...)"]
+        ML2 --> NA
+    end
+    </pre></div>
+    <p>procedureスキルの<code>guidance_text</code>は参考情報として渡るのみで、逸脱しても実行は妨げられない(非強制性)。scriptスキルは<code>ScriptSandbox</code>で実行され、ファイル/ネットワーク系importを遮断する(完全な安全境界ではない点はコード内コメントで明記)。</p>
+  </section>
+
+  <section id="phase4">
+    <h2>6. Phase4: 知識ソース+RAG(TODO生成時限定)</h2>
+    <div class="mermaid-wrap"><pre class="mermaid">
+flowchart LR
+    subgraph Bridge["DevelopmentRAGEnvironment :8766"]
+        DOCS[("docs namespace")]
+        EXP[("experience namespace")]
+    end
+    GOAL["Goal"] --> TB["decompose_goal_with_rag()"]
+    TB -->|search| DOCS
+    TB -->|search| EXP
+    DOCS --> TB
+    EXP -->|"summaryのみ"| TB
+    TB -->|"rag_context"| DGT["decompose_goal_to_todo()"]
+    DGT --> TODOS["DecomposeGoalOutput.todos"]
+    NA2["generate_next_action()"] -. "importしない" .-x Bridge
+    </pre></div>
+    <p>新規RAGサービスは構築せず、既存の<code>rag_local_bridge.py</code>(<code>:8766</code>, <code>X-API-Key</code>)を<code>docs</code>/<code>experience</code>の2namespaceで再利用する。TODO生成に添付されるのは<code>Experience.summary</code>のみ。</p>
+  </section>
+
+  <section id="phase5">
+    <h2>7. Phase5: Watchdog + TODO再構築</h2>
+    <div class="mermaid-wrap"><pre class="mermaid">
+flowchart TD
+    Start(("should_intervene")) --> C1{"継続ステップ数 >= 閾値N?"}
+    C1 -->|Yes| Rebuild["介入(True)"]
+    C1 -->|No| C2["diagnose_stall()"]
+    C2 --> C3{"shouldRebuildTodo?"}
+    C3 -->|True| Rebuild
+    C3 -->|False| Continue["継続(False)"]
+    Rebuild --> RB["rebuild_todo()\n現在TODOの過去ログのみ"]
+    </pre></div>
+    <p>二重条件(閾値到達 <strong>または</strong> <code>diagnose_stall</code>の回復不能判定)のいずれかで発火。再構築の入力スコープは現在TODOの過去ログのみに厳密化される。</p>
+  </section>
+
+  <section id="phase67">
+    <h2>8. Phase6/7: スキル自動抽出・ナビゲーション推論</h2>
+    <div class="mermaid-wrap"><pre class="mermaid">
+flowchart TD
+    subgraph P6["Phase6"]
+        LOGS["candidate_logs"] --> MDO["merge_duplicate_operations()"]
+        MDO --> SKILL["Skill(procedure, auto)"]
+        SKILL --> GATE["accept_skill()"]
+    end
+    subgraph P7["Phase7"]
+        OBS["observation"] --> CS["coarse search(top-k)"]
+        CS --> RR["scoring"]
+        RR --> LOC["localization"]
+        LOC --> FC{"final confirm(OCR)"}
+        FC -->|一致| Result["ScreenState確定"]
+        FC -->|不一致| Reject["None(偽陽性棄却)"]
+    end
+    </pre></div>
+    <p>設計書自身が「複数回反復が前提」と明記するR&amp;D領域。実データで動く最小実装+<code>TODO(Phase6/7反復)</code>コメントで反復ポイントを明示している。</p>
+  </section>
+
+  <section id="gui">
+    <h2>9. GUIダッシュボード</h2>
+    <p><code>src/vlm_auto_replay/gui/</code>はコアエンジンをブラウザから操作するFastAPI製ローカルWebアプリ。既定で決定的な<code>DemoModelClient</code>/<code>DemoGame</code>を使うため、APIキーやドライバなしで即座に動作する。</p>
+    <div class="mermaid-wrap"><pre class="mermaid">
+sequenceDiagram
+    participant Browser
+    participant API as FastAPI
+    participant State as RuntimeState
+    participant Thread as バックグラウンドスレッド
+    participant Loop as MainLoop
+
+    Browser->>API: POST /api/todo/decompose
+    API->>State: decompose(goal)
+    State-->>API: todos
+    API-->>Browser: todos(JSON)
+
+    Browser->>API: POST /api/run/start
+    API->>State: start_run(todoId)
+    State->>Thread: Thread(daemon)
+    Thread->>Loop: MainLoop.run(todo)
+    loop ステップごと
+        Loop->>State: log_step(log)へappend
+    end
+
+    loop 1.2秒ごと
+        Browser->>API: GET /api/status
+        API-->>Browser: snapshot(JSON)
+    end
+
+    Browser->>API: POST /api/run/stop
+    API->>State: stop_run()
+    </pre></div>
+    <p>フロントエンドは<code>VLMAutoReplayTool_UI_DESIGN.md</code>(Sentri風トークン)に準拠: ダークキャンバス、<span class="pill" style="background:var(--accent-lime);color:var(--ink-deep);border:none;">lime</span>強調チップ、Rubikフォント。</p>
+  </section>
+
+  <section id="tests">
+    <h2>10. テスト戦略</h2>
+    <p>決定的フェイクゲームを用い、実VLM/実HIDなしでコアフローを検証する40件のテスト。</p>
+    <table>
+      <tr><th>ファイル</th><th>検証内容</th></tr>
+      <tr><td><code>test_prompts.py</code></td><td>Phase1: 9関数の型付き入出力、モデル差し替え可能性</td></tr>
+      <tr><td><code>test_main_loop.py</code></td><td>Phase2: 決定的完走、状態変化駆動の進行</td></tr>
+      <tr><td><code>test_watchdog.py</code></td><td>Phase5: 二重条件、再構築スコープの厳密化</td></tr>
+      <tr><td><code>test_skill_runner.py</code></td><td>Phase3: procedure/script二層、サンドボックス</td></tr>
+      <tr><td><code>test_rag_boundary.py</code></td><td>Phase4: RAG境界のAST静的解析</td></tr>
+      <tr><td><code>test_skill_extraction.py</code></td><td>Phase6: 3ステップ反復→1マージ済みSkill</td></tr>
+      <tr><td><code>test_navigation.py</code></td><td>Phase7: 4段パイプライン、偽陽性防御</td></tr>
+      <tr><td><code>test_final_integration.py</code></td><td>Final Phase: procedureスキルの非強制性</td></tr>
+    </table>
+    <pre class="codeblock">.venv/Scripts/pytest -q</pre>
+  </section>
+
+  <section id="swap">
+    <h2>11. 差し替えポイント一覧</h2>
+    <table>
+      <tr><th>差し替え対象</th><th>Protocol</th><th>既定実装</th><th>本番実装の例</th></tr>
+      <tr><td>基盤モデル呼び出し</td><td><code>FoundationModelClient</code></td><td>Scripted/Demo</td><td>Claude/GPT-4V等のVLM APIラッパー</td></tr>
+      <tr><td>パッド入力</td><td><code>PadBackend</code></td><td><code>NullPadBackend</code></td><td><code>ViGEmPadBackend</code></td></tr>
+      <tr><td>キーボード・マウス</td><td><code>KeyboardMouseBackend</code></td><td><code>NullKeyboardMouseBackend</code></td><td><code>SendInputBackend</code></td></tr>
+      <tr><td>OCR</td><td><code>OcrBackend</code></td><td><code>ScriptedOcrBackend</code></td><td>pytesseract/easyocr等</td></tr>
+      <tr><td>画面キャプチャ</td><td><code>ScreenCapture</code></td><td><code>DemoGame</code></td><td><code>mss</code>等の実キャプチャ</td></tr>
+      <tr><td>画像特徴抽出</td><td><code>DescriptorExtractor</code></td><td><code>SimpleHashDescriptorExtractor</code></td><td>CNN埋め込み/CLIP等</td></tr>
+    </table>
+  </section>
+
+  </main>
+</div>
+
+<footer>VLMAutoReplayTool — 技術解説書</footer>
+
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<script>
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: "dark",
+    themeVariables: {
+      background: "#150f23",
+      primaryColor: "#1f1633",
+      primaryTextColor: "#ffffff",
+      primaryBorderColor: "#c2ef4e",
+      lineColor: "#79628c",
+      secondaryColor: "#422082",
+      tertiaryColor: "#150f23",
+      fontFamily: "Rubik, sans-serif"
+    }
+  });
+</script>
+</body>
+</html>

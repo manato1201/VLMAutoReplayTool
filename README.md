@@ -1,6 +1,22 @@
 # VLMAutoReplayTool
 
-「基盤モデルによる計画」と「専用モデル・スキル・APIによる実行」を分離したゲーム自動プレイエージェントのコア骨格実装。設計は [`VLMAutoReplayTool_DESIGN.md`](VLMAutoReplayTool_DESIGN.md) を参照。`VLMAutoReplayTool_UI_DESIGN.md` はSentri風の汎用デザイントークン集で、本ツール固有の画面仕様は未定義のため、今回のスコープには含めていない。
+「基盤モデルによる計画」と「専用モデル・スキル・APIによる実行」を分離したゲーム自動プレイエージェントのコア骨格実装。設計は [`VLMAutoReplayTool_DESIGN.md`](VLMAutoReplayTool_DESIGN.md) を参照。`VLMAutoReplayTool_UI_DESIGN.md` はSentri風の汎用デザイントークン集で、本ツール固有の画面仕様は未定義のため、GUIダッシュボードの配色・タイポグラフィのみに適用している。
+
+**技術ドキュメント**: 各Phaseのアーキテクチャ図・シーケンス図(Mermaid)付きの詳細な技術解説書を用意している。
+- [`docs/TECHNICAL_OVERVIEW.md`](docs/TECHNICAL_OVERVIEW.md) — Markdown版(GitHub上でMermaid図がそのまま描画される)
+- [`docs/technical-overview.html`](docs/technical-overview.html) — HTML版(ブラウザで開くとSentri風デザインで閲覧できる。`mermaid.js`をCDNから読み込むためオンライン環境推奨)
+
+### アーキテクチャ概観
+
+```mermaid
+flowchart LR
+    FM["基盤モデル\n(prompts/ 9関数)"] --> ML["MainLoop\n(loop/)"]
+    ML --> WD["Watchdog\n(loop/watchdog.py)"]
+    WD -->|"再構築"| FM
+    ML --> AC["Skill/API実行層\n(actions/)"]
+    RAG["RAG :8766\n(knowledge/)"] -->|"TODO生成時のみ"| FM
+    GUI["Webダッシュボード\n(gui/)"] --> ML
+```
 
 ## 実装範囲(今回のスコープ)
 
@@ -16,49 +32,50 @@
 | Phase6 | スキル自動抽出 | `src/vlm_auto_replay/skills/` 軽量実装(TODOコメントあり) |
 | Phase7 | ナビゲーション推論 | `src/vlm_auto_replay/navigation/` 軽量実装(TODOコメントあり) |
 
-## セットアップ
+## 動作確認手順(クイックスタート)
+
+初めて動かす場合は上から順に実行すれば良い。すべてWindows PowerShell/Git Bash想定、リポジトリ直下で実行する。
+
+**1. 仮想環境を作り、依存関係(テスト+GUI)をインストールする**
 
 ```bash
 python -m venv .venv
-.venv/Scripts/pip install -e ".[dev]"
+.venv/Scripts/pip install -e ".[dev,gui]"
 ```
 
-Windows実機でのHID制御(ViGEm仮想パッド)を使う場合は追加で:
+**2. 自動テスト(40件)を実行し、コアエンジンが正しく動くことを確認する**
+
+```bash
+.venv/Scripts/pytest -q
+```
+
+`40 passed` と表示されれば、Phase1〜7のコアロジック(型付きプロンプト関数・メインループ・Skill/API実行・RAG境界・Watchdog・スキル抽出・ナビゲーション)がすべて正常。
+
+**3. GUIサーバを起動する**
+
+```bash
+.venv/Scripts/python -m vlm_auto_replay.gui
+```
+
+`Uvicorn running on http://127.0.0.1:8765` と表示されたら起動完了(終了するには実行中のターミナルで `Ctrl+C`)。
+
+**4. ブラウザで `http://127.0.0.1:8765` を開き、実際に操作する**
+
+1. 「ゴール分解」欄に適当な目標(例: `ボスを撃破する`)を入力して **分解する** をクリック → 3件のTODOカードが表示される
+2. 好きなTODOカードの **実行開始** をクリック → 数秒おきにStepLog(reasoning・action・result)がライブで積み上がっていくのが見える
+3. ヘッダー右上のSTATUSが `RUNNING` → `DONE` に変わることを確認する
+4. 実行中に **停止** ボタンを押すと、その場でSTATUSが `STOPPED` になることを確認する(Watchdogの停止経路の確認)
+5. 「スキルライブラリ」パネルに `demo-skill-1`(procedureスキル)が表示されていることを確認する
+
+実VLM・実HID(ViGEm/SendInput)を使わない**デモモード**で動くため、APIキーやドライバのセットアップなしにこの一連の流れを確認できる。実モデル/実HIDへの差し替え方は次項参照。
+
+**5.(任意)Windows実機でのHID制御を使う場合**
 
 ```bash
 .venv/Scripts/pip install -e ".[hid]"
 ```
 
 (別途 [ViGEmBus](https://github.com/ViGEm/ViGEmBus) ドライバのインストールが必要)
-
-## テスト
-
-```bash
-.venv/Scripts/pytest -q
-```
-
-40件のテストで以下を検証している:
-
-- Phase1: 9関数がすべて固定入出力スキーマを持ち、モデル実装(`FoundationModelClient`)を差し替えても呼び出し側コードが変更不要であること
-- Phase2: 決定的フェイクゲーム(`tests/fixtures/fake_game.py`)を使い、`resultObservationSummary`による状態変化確認後にのみループが進むこと(固定ディレイに依存しない)
-- Phase3: procedureスキルがMainLoopを再利用し(独立ループを持たない)、非強制的なガイダンスからの逸脱を許容すること。scriptスキルのサンドボックスがファイル/ネットワークアクセスを遮断すること
-- Phase4: `generate_next_action`実行経路でRAGクライアントのimport・呼び出しが0回であることをAST静的解析とモックのコールカウントで実証
-- Phase5: 一時的失敗では再構築が発火せず、閾値到達または`diagnose_stall`の判定のいずれかで再構築が発火する二重条件
-- Phase6: 明らかな3ステップ反復フィクスチャから正確に1つのマージ済みSkillが生成されること
-- Phase7: 「もっともらしいが誤った」候補をOCRランドマーク照合(final confirmation)で棄却できること(偽陽性防御)
-
-## 操作用GUI
-
-コアエンジンをブラウザから操作できるローカルWebダッシュボードを同梱している(`src/vlm_auto_replay/gui/`)。ゴール入力→TODO分解→実行開始→StepLogのライブ表示→Watchdog状態確認までをその場で試せる。実VLM/実HIDの代わりに決定的な `DemoModelClient`/`DemoGame` を既定で使用するため、APIキーやドライバなしで即座に動作する。
-
-```bash
-.venv/Scripts/pip install -e ".[gui]"
-.venv/Scripts/python -m vlm_auto_replay.gui
-```
-
-`http://127.0.0.1:8765` を開く。デザインは `VLMAutoReplayTool_UI_DESIGN.md`(Sentri風トークン)の配色・タイポグラフィ・カード/ボタンコンポーネントに準拠している(ダークキャンバス+lime強調チップ+Rubikフォント)。
-
-実運用のモデル/HIDに差し替える場合は、`vlm_auto_replay.gui.server` をimportする前に `configure_model_client()` で実クライアントを設定しておけばよい(GUI側のコード変更は不要)。
 
 ## モデル・HIDバックエンドの差し替え
 
