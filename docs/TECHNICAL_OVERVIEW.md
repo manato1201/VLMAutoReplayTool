@@ -127,7 +127,7 @@ classDiagram
 
 ```mermaid
 sequenceDiagram
-    participant Loop as MainLoop.run()
+    participant MainLoop as MainLoop.run()
     participant Cap as ScreenCapture
     participant FM as FoundationModelClient(9関数)
     participant Exec as ActionExecutor
@@ -135,26 +135,26 @@ sequenceDiagram
     participant Sink as StepLogSink
 
     loop 1ステップ
-        Loop->>Cap: capture()
-        Cap-->>Loop: observation(before)
-        Loop->>FM: generate_next_action(todo, obs, history, guidance_text)
-        FM-->>Loop: NextActionOutput
-        Loop->>FM: explain_action_choice(action, context)
-        FM-->>Loop: reasoning
-        Note over Loop: reasoningが空ならAssertionError(監査可能性)
-        Loop->>Exec: execute(action)
-        Loop->>Cap: capture()
-        Cap-->>Loop: observation(after)
-        Loop->>FM: summarize_screen_change(before, after)
-        FM-->>Loop: resultObservationSummary
-        Loop->>Sink: log_step(StepLog)
-        Loop->>WD: should_intervene(todo, logs)
+        MainLoop->>Cap: capture()
+        Cap-->>MainLoop: observation(before)
+        MainLoop->>FM: generate_next_action(todo, obs, history, guidance_text)
+        FM-->>MainLoop: NextActionOutput
+        MainLoop->>FM: explain_action_choice(action, context)
+        FM-->>MainLoop: reasoning
+        Note over MainLoop: reasoningが空ならAssertionError(監査可能性)
+        MainLoop->>Exec: execute(action)
+        MainLoop->>Cap: capture()
+        Cap-->>MainLoop: observation(after)
+        MainLoop->>FM: summarize_screen_change(before, after)
+        FM-->>MainLoop: resultObservationSummary
+        MainLoop->>Sink: log_step(StepLog)
+        MainLoop->>WD: should_intervene(todo, logs)
         alt 介入すべき
-            WD-->>Loop: true
-            Loop->>Loop: break
+            WD-->>MainLoop: true
+            MainLoop->>MainLoop: break
         else 継続
-            WD-->>Loop: false
-            Loop->>Loop: todo_done_checker(todo, after)で完了判定
+            WD-->>MainLoop: false
+            MainLoop->>MainLoop: todo_done_checker(todo, after)で完了判定
         end
     end
 ```
@@ -168,9 +168,9 @@ sequenceDiagram
 ```mermaid
 flowchart TD
     NA["NextActionOutput\n{actionType, actionId, params}"] --> DP{ActionDispatcher}
-    DP -->|actionType=="api"| API["ApiPrimitives\npad_input/key_input/mouse_move/ocr/movement"]
-    DP -->|actionType=="skill" かつ type=="script"| SB["ScriptSandbox.execute()\n(サンドボックス実行)"]
-    DP -->|actionType=="skill" かつ type=="procedure"| ERR["ValueError\n(1ステップでは実行不可)"]
+    DP -->|"actionType=='api'"| API["ApiPrimitives\npad_input/key_input/mouse_move/ocr/movement"]
+    DP -->|"actionType=='skill' かつ type=='script'"| SB["ScriptSandbox.execute()\n(サンドボックス実行)"]
+    DP -->|"actionType=='skill' かつ type=='procedure'"| ERR["ValueError\n(1ステップでは実行不可)"]
 
     API --> PAD["ViGEmPadBackend\n(vgamepad, ViGEmBus)"]
     API --> KM["SendInputBackend\n(ctypes, Windows)"]
@@ -272,7 +272,7 @@ sequenceDiagram
     participant API as FastAPI(server.py)
     participant State as RuntimeState(runtime.py)
     participant Thread as バックグラウンドスレッド
-    participant Loop as MainLoop
+    participant MainLoop
 
     Browser->>API: POST /api/todo/decompose {goal}
     API->>State: decompose(goal)
@@ -283,9 +283,9 @@ sequenceDiagram
     Browser->>API: POST /api/run/start {todoId}
     API->>State: start_run(todoId)
     State->>Thread: threading.Thread(daemon)
-    Thread->>Loop: MainLoop.run(todo)
+    Thread->>MainLoop: MainLoop.run(todo)
     loop ステップごと
-        Loop->>State: _LiveStepLogSink.log_step(log)
+        MainLoop->>State: _LiveStepLogSink.log_step(log)
         Note over State: logsリストにappend(lock保護)
     end
     API-->>Browser: {ok: true}(即時応答)
