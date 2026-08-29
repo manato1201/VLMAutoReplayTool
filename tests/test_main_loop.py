@@ -2,8 +2,14 @@
 from __future__ import annotations
 
 from fixtures.fake_game import FakeGame
+from fixtures.helpers import (
+    FakeGameExecutor,
+    InMemoryObservationStore,
+    InMemoryStepLogSink,
+    NeverInterveneWatchdog,
+)
+
 from vlm_auto_replay.loop.main_loop import MainLoop
-from vlm_auto_replay.loop.schemas import StepLog
 from vlm_auto_replay.prompts.schemas import (
     ExplainActionOutput,
     NextActionOutput,
@@ -12,43 +18,13 @@ from vlm_auto_replay.prompts.schemas import (
 )
 
 
-class _InMemoryObservationStore:
-    def __init__(self):
-        self.stored: list[bytes] = []
-
-    def store(self, observation: bytes) -> str:
-        self.stored.append(observation)
-        return f"obs:{len(self.stored) - 1}"
-
-
-class _InMemoryStepLogSink:
-    def __init__(self):
-        self.logs: list[StepLog] = []
-
-    def log_step(self, log: StepLog) -> None:
-        self.logs.append(log)
-
-
-class _NeverInterveneWatchdog:
-    def should_intervene(self, todo, logs) -> bool:
-        return False
-
-
-class _FakeGameExecutor:
-    def __init__(self, game: FakeGame):
-        self._game = game
-
-    def execute(self, action: NextActionOutput) -> None:
-        self._game.apply(action)
-
-
-def _build_loop(game: FakeGame, sink: _InMemoryStepLogSink, watchdog=None) -> MainLoop:
+def _build_loop(game: FakeGame, sink: InMemoryStepLogSink, watchdog=None) -> MainLoop:
     return MainLoop(
         capture=game,
-        observation_store=_InMemoryObservationStore(),
+        observation_store=InMemoryObservationStore(),
         step_log_sink=sink,
-        executor=_FakeGameExecutor(game),
-        watchdog=watchdog or _NeverInterveneWatchdog(),
+        executor=FakeGameExecutor(game),
+        watchdog=watchdog or NeverInterveneWatchdog(),
         todo_done_checker=lambda todo, obs: game.is_done(),
     )
 
@@ -61,7 +37,7 @@ def _queue_advance_step(scripted_client, reasoning: str = "advance because goal 
 
 def test_main_loop_completes_deterministic_fake_game(scripted_client):
     game = FakeGame(steps_to_win=3)
-    sink = _InMemoryStepLogSink()
+    sink = InMemoryStepLogSink()
     loop = _build_loop(game, sink)
     for _ in range(3):
         _queue_advance_step(scripted_client)
@@ -89,7 +65,7 @@ def test_main_loop_progresses_only_via_state_change_not_fixed_delay(scripted_cli
     assert "sleep" not in source
 
     game = FakeGame(steps_to_win=1)
-    sink = _InMemoryStepLogSink()
+    sink = InMemoryStepLogSink()
     loop = _build_loop(game, sink)
     _queue_advance_step(scripted_client)
     todo = TodoItem(todoId="t1", description="win", doneCriteria="progress>=1")
@@ -100,7 +76,7 @@ def test_main_loop_progresses_only_via_state_change_not_fixed_delay(scripted_cli
 
 def test_step_index_monotonic_and_no_gaps_with_watchdog_intervention(scripted_client):
     game = FakeGame(steps_to_win=100)  # 絶対に完走しない
-    sink = _InMemoryStepLogSink()
+    sink = InMemoryStepLogSink()
 
     class _InterveneAfterTwo:
         def should_intervene(self, todo, logs) -> bool:
@@ -118,7 +94,7 @@ def test_step_index_monotonic_and_no_gaps_with_watchdog_intervention(scripted_cl
 
 def test_reasoning_must_not_be_empty(scripted_client):
     game = FakeGame(steps_to_win=1)
-    sink = _InMemoryStepLogSink()
+    sink = InMemoryStepLogSink()
     loop = _build_loop(game, sink)
     scripted_client.queue("generate_next_action", NextActionOutput(actionType="api", actionId="advance", params={}))
     scripted_client.queue("explain_action_choice", ExplainActionOutput(reasoning="   "))

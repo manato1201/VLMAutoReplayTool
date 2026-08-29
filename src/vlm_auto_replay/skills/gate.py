@@ -1,7 +1,8 @@
 """Phase6: 受け入れゲート。新規スキルはホールドアウトテストを通過してから登録する。"""
 from __future__ import annotations
 
-from typing import Callable, NamedTuple
+from collections.abc import Callable
+from typing import NamedTuple
 
 from ..actions.skill import Skill
 from ..prompts.schemas import TodoItem

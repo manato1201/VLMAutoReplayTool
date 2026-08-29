@@ -38,7 +38,7 @@ class ScriptSandbox:
         restricted_builtins["__import__"] = self._guarded_import
         global_ns: dict = {"__builtins__": restricted_builtins, "api": self._api, "params": params}
         compiled = compile(script_code, "<skill_script>", "exec")
-        exec(compiled, global_ns, {})
+        exec(compiled, global_ns, {})  # noqa: S102 - scriptスキル実行そのものがこのサンドボックスの目的
 
     @staticmethod
     def _guarded_import(name: str, *args, **kwargs):

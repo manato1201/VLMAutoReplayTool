@@ -4,19 +4,18 @@
 """
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from ..prompts.model_client import configure_model_client, get_model_client
 from .runtime import DemoModelClient, RuntimeState
 
 _STATIC_DIR = Path(__file__).parent / "static"
-
-app = FastAPI(title="VLMAutoReplayTool Control Panel")
-state = RuntimeState()
 
 
 def _ensure_model_client_configured() -> None:
@@ -28,7 +27,17 @@ def _ensure_model_client_configured() -> None:
         configure_model_client(DemoModelClient())
 
 
-_ensure_model_client_configured()
+@asynccontextmanager
+async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    # モデルクライアントの解決はアプリ起動時(import時ではなく)に行う。import時点で
+    # 副作用を発生させると、テストなど「このモジュールをimportするだけ」のコードから
+    # 意図せずグローバルなモデルクライアント設定が書き換わってしまうため。
+    _ensure_model_client_configured()
+    yield
+
+
+app = FastAPI(title="VLMAutoReplayTool Control Panel", lifespan=_lifespan)
+state = RuntimeState()
 
 
 class DecomposeRequest(BaseModel):
@@ -37,7 +46,7 @@ class DecomposeRequest(BaseModel):
 
 class StartRunRequest(BaseModel):
     todoId: str
-    maxSteps: int = 12
+    maxSteps: int = Field(default=12, ge=1, le=200)
 
 
 @app.get("/api/status")
@@ -49,7 +58,12 @@ def api_status() -> dict:
 def api_decompose(req: DecomposeRequest) -> dict:
     if not req.goal.strip():
         raise HTTPException(status_code=400, detail="goalは空にできません。")
-    todos = state.decompose(req.goal)
+    try:
+        todos = state.decompose(req.goal)
+    except Exception as exc:
+        # 実モデルクライアントに差し替えた場合、API障害等でここが例外を投げうる。
+        # 未捕捉のまま500 Internal Server Errorになるより、原因をそのままJSONで返す。
+        raise HTTPException(status_code=502, detail=f"ゴール分解に失敗しました: {exc}") from exc
     return {"todos": [t.model_dump() for t in todos]}
 
 

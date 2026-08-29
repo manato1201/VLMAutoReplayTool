@@ -2,7 +2,13 @@
 from __future__ import annotations
 
 import pytest
-from vlm_auto_replay.actions.api_primitives import ApiPrimitives, NullKeyboardMouseBackend, NullPadBackend, ScriptedOcrBackend
+
+from vlm_auto_replay.actions.api_primitives import (
+    ApiPrimitives,
+    NullKeyboardMouseBackend,
+    NullPadBackend,
+    ScriptedOcrBackend,
+)
 from vlm_auto_replay.navigation.localizer import Localizer, SimpleHashDescriptorExtractor
 from vlm_auto_replay.navigation.screen_state import ScreenState, UnknownTransitionError, validate_transition
 
@@ -54,6 +60,30 @@ def test_coarse_search_limits_candidates_to_top_k():
     many_states = _states() * 5  # 10状態
     coarse = localizer._global_descriptor_search(_IMAGES["menu"], many_states)
     assert len(coarse) <= localizer._coarse_top_k
+
+
+def test_descriptor_cache_avoids_redundant_extraction_across_calls():
+    """既知状態の特徴量は referenceImageRef ごとにキャッシュされ、localize()を複数回
+    呼んでも同じ参照画像の再読み込み・再抽出が繰り返されないこと(効率化のリファクタリング)。
+    キャッシュされるのは既知状態側の特徴量のみ(image_loader経由)であり、毎回変化しうる
+    観測画像自体の特徴量抽出はキャッシュ対象ではないため、image_loaderの呼び出し回数で検証する。
+    """
+    load_calls: list[str] = []
+
+    def _counting_loader(ref: str) -> bytes:
+        load_calls.append(ref)
+        return _IMAGES[ref]
+
+    api = ApiPrimitives(NullPadBackend(), NullKeyboardMouseBackend(), ScriptedOcrBackend(default_text="MENU"))
+    localizer = Localizer(descriptor_extractor=SimpleHashDescriptorExtractor(), image_loader=_counting_loader, api=api)
+    states = _states()
+
+    localizer.localize(_IMAGES["menu"], states)
+    localizer.localize(_IMAGES["menu"], states)
+
+    # 2状態(menu/battle)分の参照画像は初回のlocalize()でキャッシュされ、2回目では
+    # image_loaderが再度呼ばれない = 呼び出し回数は状態数のまま増えない。
+    assert len(load_calls) == len(states)
 
 
 def test_validate_transition_detects_unknown_transition():

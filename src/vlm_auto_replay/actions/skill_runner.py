@@ -9,7 +9,14 @@ from .skill import Skill
 
 
 class SkillRunner:
-    def __init__(self, main_loop: MainLoop, sandbox: ScriptSandbox):
+    """procedureスキルとscriptスキルの両方を実行する。
+
+    main_loop は run_procedure_skill でのみ使用する。run_script_skill のみを
+    使う呼び出し側(例: ActionDispatcher経由のscriptスキル単体実行)は main_loop=None
+    のまま構築してよい — その場合 run_procedure_skill を呼ぶと明示的なエラーになる。
+    """
+
+    def __init__(self, main_loop: MainLoop | None, sandbox: ScriptSandbox):
         self._loop = main_loop
         self._sandbox = sandbox
 
@@ -20,9 +27,15 @@ class SkillRunner:
         """
         if skill.type != "procedure":
             raise ValueError(f"run_procedure_skillはtype=='procedure'のみ対応です: {skill.type}")
+        if self._loop is None:
+            raise RuntimeError(
+                "run_procedure_skillにはmain_loopが必要です。main_loop=NoneでSkillRunnerを"
+                "構築した場合はrun_script_skillのみ呼び出し可能です。"
+            )
         return self._loop.run(todo, max_steps=max_steps, guidance_text=skill.proceduralText)
 
     def run_script_skill(self, skill: Skill, params: dict) -> None:
         if skill.type != "script":
             raise ValueError(f"run_script_skillはtype=='script'のみ対応です: {skill.type}")
-        self._sandbox.execute(skill.scriptCode, params)  # type: ignore[arg-type]
+        assert skill.scriptCode is not None  # Skillのvalidatorによりtype=="script"なら非null保証済み
+        self._sandbox.execute(skill.scriptCode, params)

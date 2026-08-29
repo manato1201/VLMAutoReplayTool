@@ -12,6 +12,11 @@ from .api_primitives import ApiPrimitives
 from .skill import Skill
 from .skill_runner import SkillRunner
 
+# ApiPrimitivesの公開primitiveのみを明示的に許可する。getattrで任意属性を無条件に
+# 呼び出すと、actionIdの値次第でApiPrimitives上の想定外の属性(将来追加される
+# private helperや内部状態)まで呼び出せてしまうため、ホワイトリストで絞る。
+_ALLOWED_API_PRIMITIVES = frozenset({"pad_input", "key_input", "mouse_move", "ocr", "movement"})
+
 
 class ActionDispatcher:
     def __init__(self, api: ApiPrimitives, skill_library: dict[str, Skill], skill_runner: SkillRunner):
@@ -28,9 +33,9 @@ class ActionDispatcher:
             raise ValueError(f"未知のactionTypeです: {action.actionType}")
 
     def _dispatch_api(self, action_id: str, params: dict) -> None:
-        primitive = getattr(self._api, action_id, None)
-        if primitive is None or not callable(primitive):
+        if action_id not in _ALLOWED_API_PRIMITIVES:
             raise KeyError(f"未知のAPI primitiveです: {action_id}")
+        primitive = getattr(self._api, action_id)
         primitive(**params)
 
     def _dispatch_skill(self, action_id: str, params: dict) -> None:

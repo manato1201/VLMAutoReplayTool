@@ -17,7 +17,7 @@ class Skill(BaseModel):
     sourceTrace: list[str] | None = None  # 自動生成時の元ソース参照(動画/ログ)
 
     @model_validator(mode="after")
-    def _check_type_fields(self) -> "Skill":
+    def _check_type_fields(self) -> Skill:
         if self.type == "procedure" and self.proceduralText is None:
             raise ValueError("type=='procedure' には proceduralText が必須です。")
         if self.type == "script" and self.scriptCode is None:

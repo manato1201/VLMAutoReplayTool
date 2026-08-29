@@ -123,4 +123,4 @@ class MainLoop:
 
     @staticmethod
     def _now() -> str:
-        return datetime.datetime.now(datetime.timezone.utc).isoformat()
+        return datetime.datetime.now(datetime.UTC).isoformat()
