@@ -318,16 +318,20 @@ sequenceDiagram
 | `GET /api/observation/{ref}` | StepLog.observationRefに対応するサムネイル画像(SVG)を返す |
 | `POST /api/skills` | `{gameTitle, proceduralText}` → procedureスキルを追加(`createdBy="manual"`) |
 | `DELETE /api/skills/{skillId}` | スキルライブラリから削除 |
+| `GET /api/history` | 過去の実行(SQLiteに永続化)の一覧を`startedAt`降順で返す |
+| `GET /api/history/{runId}` | 特定Runのメタデータ+全StepLog |
 
 **進捗の可視化**: `DemoGame`は`progress`/`steps_to_win`を公開プロパティとして持ち、`RuntimeState`が実行中のインスタンスを`_current_game`として保持することで`/api/status`から参照できる。フロントエンドはこれをプログレスバーとして描画する。
 
 **StepLogの画像プレビュー**: `MainLoop`が呼ぶ`ObservationStore.store()`の実装(`_StateObservationStore`)は、観測バイト列を`RuntimeState.observations`辞書に保存し`obs-xxxxxxxx`形式の参照キーを返す。`GET /api/observation/{ref}`はこれを取り出し、`render_observation_svg()`でサムネイルSVGに変換して返す。DemoGameの観測形式(`progress=X/Y`というテキスト)を前提にした合成描画であることを明記しており、実運用でScreenCaptureを実キャプチャに差し替えた場合は、`observationRef`が実際のスクリーンショットバイト列/URLを指すため、このエンドポイントは合成描画を経由せずバイト列をそのまま返すだけでよい。
 
+**セッションの永続化**(`gui/persistence.py::SqlitePersistence`): 以前はGUIの状態が全てインメモリでサーバー再起動により消えていた。スキルライブラリと実行履歴(Run+StepLog)をSQLite(`~/.vlm_auto_replay/gui.sqlite3`、テストでは`:memory:`または`tmp_path`)に永続化する。`RuntimeState.start_run`はスレッド起動前に同期的に`runs`テーブルへ行を作成するため、実行中のRunも`/api/history`に即座に現れる。各StepLogは`_LiveStepLogSink.log_step`でインメモリの`self.logs`へのappendと同時に`db.append_log()`で永続化される。スキーマは`skills` / `runs` / `run_logs`の3テーブルのみで、マイグレーション機構は持たない(`CREATE TABLE IF NOT EXISTS`のみ)。実行履歴は将来的に`extract_experience`(Phase1)の入力データ源として使える設計だが、自動投入は未実装(反復ポイント)。
+
 ---
 
 ## 10. テスト戦略
 
-`tests/` 配下、52件。決定的フェイクゲーム(`tests/fixtures/fake_game.py`)を用い、実VLM/実HIDなしでコアフローをエンドツーエンドに近い形で検証する。共有テストダブル(`InMemoryObservationStore`等)は`tests/fixtures/helpers.py`に集約し、テストファイル間の直接importに依存しない。
+`tests/` 配下、55件。決定的フェイクゲーム(`tests/fixtures/fake_game.py`)を用い、実VLM/実HIDなしでコアフローをエンドツーエンドに近い形で検証する。共有テストダブル(`InMemoryObservationStore`等)は`tests/fixtures/helpers.py`に集約し、テストファイル間の直接importに依存しない。
 
 | ファイル | 検証内容 |
 |---|---|

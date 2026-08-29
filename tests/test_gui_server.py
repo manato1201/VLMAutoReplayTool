@@ -4,6 +4,10 @@ DemoModelClient/DemoGameが既定で動くため、実VLM/実HIDなしでエン�
 形で検証できる。モデルクライアントのグローバル状態は他テストと共有されるため、
 各テストの前後で明示的にリセットしてから TestClient のlifespan(起動時のみ
 DemoModelClientを注入する)に解決させる。
+
+RuntimeStateはSQLiteに永続化するため、テストがユーザーの実DB
+(~/.vlm_auto_replay/gui.sqlite3)に触れないよう、テストごとに`:memory:`DBを
+持つ新しいRuntimeStateへ差し替える(サーバ本体のモジュールグローバルをmonkeypatch)。
 """
 
 from __future__ import annotations
@@ -17,22 +21,14 @@ from vlm_auto_replay.prompts.model_client import reset_model_client
 
 
 @pytest.fixture
-def client():
+def client(monkeypatch):
     reset_model_client()
-    from vlm_auto_replay.gui.runtime import _default_skill_library
-    from vlm_auto_replay.gui.server import app, state
+    import vlm_auto_replay.gui.server as server_module
+    from vlm_auto_replay.gui.runtime import RuntimeState
 
-    # 前のテストの実行結果が残らないよう、テストごとに状態を初期化する。
-    state.todos = []
-    state.logs = []
-    state.observations = {}
-    state.skill_library = _default_skill_library()
-    state.status = "idle"
-    state.active_todo_id = None
-    state.error = None
-    state._current_game = None
+    monkeypatch.setattr(server_module, "state", RuntimeState(db_path=":memory:"))
 
-    with TestClient(app) as c:
+    with TestClient(server_module.app) as c:
         yield c
     reset_model_client()
 
@@ -120,3 +116,51 @@ def test_add_skill_rejects_empty_procedural_text(client):
 def test_delete_unknown_skill_returns_404(client):
     resp = client.delete("/api/skills/does-not-exist")
     assert resp.status_code == 404
+
+
+def test_history_lists_completed_run_and_detail_matches_status_logs(client):
+    resp = client.post("/api/todo/decompose", json={"goal": "履歴テスト"})
+    todo = resp.json()["todos"][0]
+    client.post("/api/run/start", json={"todoId": todo["todoId"], "maxSteps": 12})
+
+    deadline = time.monotonic() + 10
+    status = client.get("/api/status").json()
+    while status["status"] == "running" and time.monotonic() < deadline:
+        time.sleep(0.2)
+        status = client.get("/api/status").json()
+    assert status["status"] == "done"
+
+    history = client.get("/api/history").json()["runs"]
+    assert len(history) == 1
+    assert history[0]["todoId"] == todo["todoId"]
+    assert history[0]["todoDescription"] == todo["description"]
+    assert history[0]["status"] == "done"
+    assert history[0]["finishedAt"] is not None
+
+    detail = client.get(f"/api/history/{history[0]['runId']}").json()
+    assert detail["run"]["runId"] == history[0]["runId"]
+    assert [log["stepIndex"] for log in detail["logs"]] == [log["stepIndex"] for log in status["logs"]]
+
+
+def test_history_detail_returns_404_for_unknown_run_id(client):
+    resp = client.get("/api/history/does-not-exist")
+    assert resp.status_code == 404
+
+
+def test_skill_library_survives_runtime_state_restart(tmp_path):
+    """RuntimeStateを同じdb_pathで再構築しても、追加したスキルが失われないこと
+    (サーバー再起動をまたいだ永続化の実証)。
+    """
+    from vlm_auto_replay.gui.runtime import RuntimeState
+
+    db_path = tmp_path / "gui.sqlite3"
+    first = RuntimeState(db_path=db_path)
+    added = first.add_skill("PersistedGame", "1. explore\n2. fight")
+
+    second = RuntimeState(db_path=db_path)
+    assert added.skillId in second.skill_library
+    assert second.skill_library[added.skillId].gameTitle == "PersistedGame"
+
+    second.remove_skill(added.skillId)
+    third = RuntimeState(db_path=db_path)
+    assert added.skillId not in third.skill_library

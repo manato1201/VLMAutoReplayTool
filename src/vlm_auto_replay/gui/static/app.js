@@ -13,6 +13,8 @@ const skillGameTitleEl = document.getElementById("skill-game-title");
 const skillProceduralTextEl = document.getElementById("skill-procedural-text");
 const addSkillBtn = document.getElementById("add-skill-btn");
 const skillErrorEl = document.getElementById("skill-error");
+const historyListEl = document.getElementById("history-list");
+const historyDetailEl = document.getElementById("history-detail");
 
 async function postJson(url, body) {
   const res = await fetch(url, {
@@ -71,10 +73,10 @@ function renderProgress(progress, stepsToWin) {
   progressLabelEl.textContent = `${progress} / ${stepsToWin}`;
 }
 
-function renderLogs(logs) {
-  logFeedEl.innerHTML = "";
+function renderLogs(logs, container = logFeedEl, emptyMessage = "まだ実行ログがありません。") {
+  container.innerHTML = "";
   if (logs.length === 0) {
-    logFeedEl.innerHTML = '<p class="empty-hint">まだ実行ログがありません。</p>';
+    container.innerHTML = `<p class="empty-hint">${escapeHtml(emptyMessage)}</p>`;
     return;
   }
   for (const log of logs) {
@@ -97,7 +99,7 @@ function renderLogs(logs) {
 
     entry.appendChild(thumb);
     entry.appendChild(body);
-    logFeedEl.appendChild(entry);
+    container.appendChild(entry);
   }
 }
 
@@ -138,6 +140,41 @@ function renderSkills(skills) {
   }
 }
 
+function renderHistory(runs) {
+  historyListEl.innerHTML = "";
+  if (runs.length === 0) {
+    historyListEl.innerHTML = '<p class="empty-hint">まだ実行履歴がありません。</p>';
+    return;
+  }
+  for (const run of runs) {
+    const entry = document.createElement("div");
+    entry.className = "history-entry";
+
+    const meta = document.createElement("div");
+    meta.className = "history-meta";
+    meta.innerHTML = `<div class="todo-desc">${escapeHtml(run.todoDescription)}</div><div class="todo-done">${escapeHtml(run.startedAt)}</div>`;
+
+    const status = document.createElement("span");
+    status.className = `history-status status-${run.status}`;
+    status.textContent = run.status;
+
+    const viewBtn = document.createElement("button");
+    viewBtn.className = "btn-small";
+    viewBtn.textContent = "ログを見る";
+    viewBtn.onclick = async () => {
+      const res = await fetch(`/api/history/${encodeURIComponent(run.runId)}`);
+      if (!res.ok) return;
+      const detail = await res.json();
+      renderLogs(detail.logs, historyDetailEl, "このRunにはログがありません。");
+    };
+
+    entry.appendChild(meta);
+    entry.appendChild(status);
+    entry.appendChild(viewBtn);
+    historyListEl.appendChild(entry);
+  }
+}
+
 function escapeHtml(value) {
   return String(value)
     .replaceAll("&", "&amp;")
@@ -151,6 +188,7 @@ async function refresh() {
 
   statusPill.textContent = `STATUS: ${snapshot.status.toUpperCase()}`;
   statusPill.classList.toggle("running", snapshot.status === "running");
+  statusPill.classList.toggle("error", snapshot.status === "error");
 
   renderTodos(snapshot.todos, snapshot.activeTodoId, snapshot.status);
   renderProgress(snapshot.progress, snapshot.stepsToWin);
@@ -163,6 +201,10 @@ async function refresh() {
   if (snapshot.error) {
     runErrorEl.textContent = snapshot.error;
   }
+
+  const historyRes = await fetch("/api/history");
+  const history = await historyRes.json();
+  renderHistory(history.runs);
 }
 
 decomposeBtn.onclick = async () => {

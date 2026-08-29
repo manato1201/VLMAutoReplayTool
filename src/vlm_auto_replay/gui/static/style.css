@@ -88,6 +88,10 @@ body {
   padding: 24px;
 }
 
+.panel-wide {
+  grid-column: 1 / -1;
+}
+
 .panel-title {
   font-size: 20px;
   font-weight: 600;
@@ -324,4 +328,65 @@ body {
   font-size: 12px;
   cursor: pointer;
   flex-shrink: 0;
+}
+
+.history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.history-entry {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: var(--surface-night);
+  border: 1px solid var(--hairline-violet);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.history-status {
+  font-family: "Monaco", "Menlo", "Ubuntu Mono", monospace;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  padding: 2px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--hairline-violet);
+  color: var(--on-dark-muted);
+  flex-shrink: 0;
+}
+
+.history-status.status-done {
+  color: var(--accent-lime);
+  border-color: var(--accent-lime);
+}
+
+.history-status.status-error {
+  color: var(--accent-pink);
+  border-color: var(--accent-pink);
+}
+
+.history-status.status-running {
+  color: var(--accent-lime);
+  border-color: var(--accent-lime);
+}
+
+.history-meta {
+  min-width: 0;
+  flex: 1;
+}
+
+.history-meta .todo-desc {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.eyebrow.error {
+  color: var(--accent-pink);
+  border-color: var(--accent-pink);
 }

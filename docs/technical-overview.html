@@ -434,14 +434,17 @@ sequenceDiagram
       <tr><td><code>GET /api/observation/{ref}</code></td><td>StepLogのサムネイル画像(SVG)を返す</td></tr>
       <tr><td><code>POST /api/skills</code></td><td>gameTitle+proceduralText → procedureスキルを追加</td></tr>
       <tr><td><code>DELETE /api/skills/{skillId}</code></td><td>スキルライブラリから削除</td></tr>
+      <tr><td><code>GET /api/history</code></td><td>過去の実行(SQLite永続化)の一覧をstartedAt降順で返す</td></tr>
+      <tr><td><code>GET /api/history/{runId}</code></td><td>特定Runのメタデータ+全StepLog</td></tr>
     </table>
     <p><strong>進捗の可視化</strong>: <code>DemoGame.progress</code>/<code>steps_to_win</code>を<code>RuntimeState</code>が実行中インスタンス経由で公開し、フロントエンドがプログレスバーとして描画する。</p>
     <p><strong>画像プレビュー</strong>: 観測バイト列は<code>RuntimeState.observations</code>に保存され、<code>/api/observation/{ref}</code>が<code>render_observation_svg()</code>でサムネイルSVGへ変換して返す。実運用で実キャプチャに差し替えた場合は、このエンドポイントがバイト列をそのまま返すだけでよい構造。</p>
+    <p><strong>セッションの永続化</strong>(<code>gui/persistence.py::SqlitePersistence</code>): スキルライブラリと実行履歴をSQLite(<code>~/.vlm_auto_replay/gui.sqlite3</code>)に永続化し、サーバー再起動後も残る。<code>skills</code>/<code>runs</code>/<code>run_logs</code>の3テーブルのみで、マイグレーション機構は持たない。</p>
   </section>
 
   <section id="tests">
     <h2>10. テスト戦略</h2>
-    <p>決定的フェイクゲームを用い、実VLM/実HIDなしでコアフローを検証する52件のテスト。</p>
+    <p>決定的フェイクゲームを用い、実VLM/実HIDなしでコアフローを検証する55件のテスト。</p>
     <table>
       <tr><th>ファイル</th><th>検証内容</th></tr>
       <tr><td><code>test_prompts.py</code></td><td>Phase1: 9関数の型付き入出力、モデル差し替え可能性</td></tr>
