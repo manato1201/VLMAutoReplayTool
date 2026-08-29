@@ -7,6 +7,7 @@
 """
 from __future__ import annotations
 
+import re
 import threading
 import time
 import uuid
@@ -95,6 +96,14 @@ class DemoGame:
         # このディレイに依存しない(Phase2の要件通り)。
         self._step_delay_sec = step_delay_sec
 
+    @property
+    def progress(self) -> int:
+        return self._progress
+
+    @property
+    def steps_to_win(self) -> int:
+        return self._steps_to_win
+
     def capture(self) -> bytes:
         return f"progress={self._progress}/{self._steps_to_win}".encode()
 
@@ -107,13 +116,64 @@ class DemoGame:
         return self._progress >= self._steps_to_win
 
 
-class _InMemoryObservationStore:
-    def __init__(self) -> None:
-        self._n = 0
+_DEMO_OBSERVATION_RE = re.compile(r"progress=(\d+)/(\d+)")
+
+
+def _render_progress_svg(progress: int, steps_to_win: int) -> bytes:
+    """DemoGameの観測(`progress=X/Y`)をStepLogのサムネイル用SVGへ変換する。
+
+    実運用でScreenCaptureを実キャプチャに差し替えた場合、observationRefは実際の
+    スクリーンショットバイト列/URLを指すため、この合成描画は経由しない
+    (GET /api/observation/{ref} がそのままバイト列を返すだけでよくなる)。
+    """
+    width, height = 240, 135
+    ratio = (progress / steps_to_win) if steps_to_win else 0.0
+    bar_width = round(200 * min(max(ratio, 0.0), 1.0))
+    return (
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" '
+        f'viewBox="0 0 {width} {height}">'
+        f'<rect width="{width}" height="{height}" fill="#150f23"/>'
+        f'<text x="16" y="32" fill="#ffffff" font-family="Rubik, sans-serif" font-size="14" '
+        f'font-weight="600">DEMO SCREEN</text>'
+        f'<rect x="16" y="60" width="200" height="16" rx="8" fill="#362d59"/>'
+        f'<rect x="16" y="60" width="{bar_width}" height="16" rx="8" fill="#c2ef4e"/>'
+        f'<text x="16" y="100" fill="#bdb8c0" font-family="Rubik, sans-serif" font-size="12">'
+        f"progress {progress} / {steps_to_win}</text>"
+        f"</svg>"
+    ).encode()
+
+
+def _render_placeholder_svg(observation: bytes) -> bytes:
+    text = observation.decode(errors="ignore")[:40]
+    return (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="240" height="135" viewBox="0 0 240 135">'
+        '<rect width="240" height="135" fill="#150f23"/>'
+        '<text x="16" y="32" fill="#ffffff" font-family="Rubik, sans-serif" font-size="14" '
+        'font-weight="600">OBSERVATION</text>'
+        f'<text x="16" y="70" fill="#bdb8c0" font-family="Monaco, monospace" font-size="11">{text}</text>'
+        "</svg>"
+    ).encode()
+
+
+def render_observation_svg(observation: bytes) -> bytes:
+    """観測バイト列(デモ形式)をStepLogサムネイル用のSVGにレンダリングする。"""
+    match = _DEMO_OBSERVATION_RE.fullmatch(observation.decode(errors="ignore"))
+    if match is None:
+        return _render_placeholder_svg(observation)
+    return _render_progress_svg(int(match.group(1)), int(match.group(2)))
+
+
+class _StateObservationStore:
+    """観測バイト列をRuntimeStateへ保存し、`/api/observation/{ref}`から参照可能にする。"""
+
+    def __init__(self, state: RuntimeState):
+        self._state = state
 
     def store(self, observation: bytes) -> str:
-        self._n += 1
-        return f"obs:{self._n}:{observation.decode(errors='ignore')}"
+        ref = f"obs-{uuid.uuid4().hex[:8]}"
+        with self._state.lock:
+            self._state.observations[ref] = observation
+        return ref
 
 
 class _DemoExecutor:
@@ -150,35 +210,43 @@ class _StoppableWatchdog:
         return self._base.should_intervene(todo, logs)
 
 
+def _default_skill_library() -> dict[str, Skill]:
+    return {
+        "demo-skill-1": Skill(
+            skillId="demo-skill-1",
+            gameTitle="DemoGame",
+            type="procedure",
+            proceduralText="1. 周囲を観察する\n2. 目標に向けて前進する\n3. 達成を確認する",
+            paramSchema={},
+            createdBy="manual",
+        )
+    }
+
+
 class RuntimeState:
     def __init__(self) -> None:
         self.lock = threading.Lock()
         self.todos: list[TodoItem] = []
         self.logs: list[StepLog] = []
-        self.skill_library: dict[str, Skill] = {
-            "demo-skill-1": Skill(
-                skillId="demo-skill-1",
-                gameTitle="DemoGame",
-                type="procedure",
-                proceduralText="1. 周囲を観察する\n2. 目標に向けて前進する\n3. 達成を確認する",
-                paramSchema={},
-                createdBy="manual",
-            )
-        }
+        self.observations: dict[str, bytes] = {}
+        self.skill_library: dict[str, Skill] = _default_skill_library()
         self._watchdog = _StoppableWatchdog(Watchdog(stall_step_threshold=8))
         self.status = "idle"  # idle | running | done | stopped
         self.active_todo_id: str | None = None
         self.error: str | None = None
         self._thread: threading.Thread | None = None
+        self._current_game: DemoGame | None = None
 
     def decompose(self, goal: str) -> list[TodoItem]:
         result = decompose_goal_to_todo(goal, rag_context=[])
         with self.lock:
             self.todos = result.todos
             self.logs = []
+            self.observations = {}
             self.status = "idle"
             self.active_todo_id = None
             self.error = None
+            self._current_game = None
         return result.todos
 
     def start_run(self, todo_id: str, max_steps: int = 12) -> None:
@@ -189,16 +257,20 @@ class RuntimeState:
             if todo is None:
                 raise KeyError(f"未知のtodoIdです: {todo_id}")
             self.logs = []
+            self.observations = {}
             self.status = "running"
             self.active_todo_id = todo_id
             self.error = None
             self._watchdog.stop_requested = False
 
+        game = DemoGame(steps_to_win=5, step_delay_sec=0.5)
+        with self.lock:
+            self._current_game = game
+
         def _run() -> None:
-            game = DemoGame(steps_to_win=5, step_delay_sec=0.5)
             loop = MainLoop(
                 capture=game,
-                observation_store=_InMemoryObservationStore(),
+                observation_store=_StateObservationStore(self),
                 step_log_sink=_LiveStepLogSink(self),
                 executor=_DemoExecutor(game),
                 watchdog=self._watchdog,
@@ -219,13 +291,39 @@ class RuntimeState:
     def stop_run(self) -> None:
         self._watchdog.stop_requested = True
 
+    def get_observation(self, ref: str) -> bytes | None:
+        with self.lock:
+            return self.observations.get(ref)
+
+    def add_skill(self, game_title: str, procedural_text: str) -> Skill:
+        skill = Skill(
+            skillId=f"skill-{uuid.uuid4().hex[:8]}",
+            gameTitle=game_title,
+            type="procedure",
+            proceduralText=procedural_text,
+            paramSchema={},
+            createdBy="manual",
+        )
+        with self.lock:
+            self.skill_library[skill.skillId] = skill
+        return skill
+
+    def remove_skill(self, skill_id: str) -> None:
+        with self.lock:
+            if skill_id not in self.skill_library:
+                raise KeyError(f"未知のskillIdです: {skill_id}")
+            del self.skill_library[skill_id]
+
     def snapshot(self) -> dict:
         with self.lock:
+            game = self._current_game
             return {
                 "status": self.status,
                 "activeTodoId": self.active_todo_id,
                 "error": self.error,
                 "watchdogThreshold": self._watchdog.threshold,
+                "progress": game.progress if game else 0,
+                "stepsToWin": game.steps_to_win if game else 0,
                 "todos": [t.model_dump() for t in self.todos],
                 "logs": [log.model_dump() for log in self.logs],
                 "skills": [s.model_dump() for s in self.skill_library.values()],

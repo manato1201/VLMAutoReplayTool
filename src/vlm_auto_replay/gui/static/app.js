@@ -7,6 +7,12 @@ const skillListEl = document.getElementById("skill-list");
 const watchdogInfoEl = document.getElementById("watchdog-info");
 const stopBtn = document.getElementById("stop-btn");
 const runErrorEl = document.getElementById("run-error");
+const progressBarEl = document.getElementById("progress-bar");
+const progressLabelEl = document.getElementById("progress-label");
+const skillGameTitleEl = document.getElementById("skill-game-title");
+const skillProceduralTextEl = document.getElementById("skill-procedural-text");
+const addSkillBtn = document.getElementById("add-skill-btn");
+const skillErrorEl = document.getElementById("skill-error");
 
 async function postJson(url, body) {
   const res = await fetch(url, {
@@ -14,6 +20,15 @@ async function postJson(url, body) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body ?? {}),
   });
+  if (!res.ok) {
+    const detail = await res.json().catch(() => ({}));
+    throw new Error(detail.detail || `${url} failed: ${res.status}`);
+  }
+  return res.json();
+}
+
+async function deleteJson(url) {
+  const res = await fetch(url, { method: "DELETE" });
   if (!res.ok) {
     const detail = await res.json().catch(() => ({}));
     throw new Error(detail.detail || `${url} failed: ${res.status}`);
@@ -50,6 +65,12 @@ function renderTodos(todos, activeTodoId, status) {
   }
 }
 
+function renderProgress(progress, stepsToWin) {
+  const ratio = stepsToWin > 0 ? Math.min(progress / stepsToWin, 1) : 0;
+  progressBarEl.style.width = `${Math.round(ratio * 100)}%`;
+  progressLabelEl.textContent = `${progress} / ${stepsToWin}`;
+}
+
 function renderLogs(logs) {
   logFeedEl.innerHTML = "";
   if (logs.length === 0) {
@@ -59,12 +80,23 @@ function renderLogs(logs) {
   for (const log of logs) {
     const entry = document.createElement("div");
     entry.className = "log-entry";
-    entry.innerHTML = `
+
+    const thumb = document.createElement("img");
+    thumb.className = "log-thumb";
+    thumb.alt = `step ${log.stepIndex} observation`;
+    thumb.src = `/api/observation/${encodeURIComponent(log.observationRef)}`;
+
+    const body = document.createElement("div");
+    body.className = "log-body";
+    body.innerHTML = `
       <div class="log-step">STEP ${log.stepIndex} — ${escapeHtml(log.timestamp)}</div>
       <div class="log-reasoning">${escapeHtml(log.reasoning)}</div>
       <div class="log-action">action: ${escapeHtml(JSON.stringify(log.actionTaken))}</div>
       <div class="log-summary">result: ${escapeHtml(log.resultObservationSummary)}</div>
     `;
+
+    entry.appendChild(thumb);
+    entry.appendChild(body);
     logFeedEl.appendChild(entry);
   }
 }
@@ -78,7 +110,30 @@ function renderSkills(skills) {
   for (const skill of skills) {
     const card = document.createElement("div");
     card.className = "skill-card";
-    card.innerHTML = `<div><div class="todo-desc">${escapeHtml(skill.skillId)}</div><div class="todo-done">type=${skill.type} / createdBy=${skill.createdBy}</div></div>`;
+
+    const info = document.createElement("div");
+    const proceduralText = skill.type === "procedure" ? skill.proceduralText : skill.scriptCode;
+    info.innerHTML = `
+      <div class="todo-desc">${escapeHtml(skill.gameTitle)} — ${escapeHtml(skill.skillId)}</div>
+      <div class="todo-done">type=${skill.type} / createdBy=${skill.createdBy}</div>
+      <pre class="skill-procedural-text">${escapeHtml(proceduralText || "")}</pre>
+    `;
+
+    const deleteBtn = document.createElement("button");
+    deleteBtn.className = "btn-delete";
+    deleteBtn.textContent = "削除";
+    deleteBtn.onclick = async () => {
+      skillErrorEl.textContent = "";
+      try {
+        await deleteJson(`/api/skills/${encodeURIComponent(skill.skillId)}`);
+        await refresh();
+      } catch (e) {
+        skillErrorEl.textContent = e.message;
+      }
+    };
+
+    card.appendChild(info);
+    card.appendChild(deleteBtn);
     skillListEl.appendChild(card);
   }
 }
@@ -98,6 +153,7 @@ async function refresh() {
   statusPill.classList.toggle("running", snapshot.status === "running");
 
   renderTodos(snapshot.todos, snapshot.activeTodoId, snapshot.status);
+  renderProgress(snapshot.progress, snapshot.stepsToWin);
   renderLogs(snapshot.logs);
   renderSkills(snapshot.skills);
 
@@ -115,6 +171,7 @@ decomposeBtn.onclick = async () => {
   runErrorEl.textContent = "";
   try {
     await postJson("/api/todo/decompose", { goal });
+    await refresh();
   } catch (e) {
     runErrorEl.textContent = e.message;
   }
@@ -122,6 +179,26 @@ decomposeBtn.onclick = async () => {
 
 stopBtn.onclick = async () => {
   await postJson("/api/run/stop", {});
+};
+
+addSkillBtn.onclick = async () => {
+  const proceduralText = skillProceduralTextEl.value.trim();
+  if (!proceduralText) {
+    skillErrorEl.textContent = "手順テキストを入力してください。";
+    return;
+  }
+  skillErrorEl.textContent = "";
+  try {
+    await postJson("/api/skills", {
+      gameTitle: skillGameTitleEl.value.trim() || "MyGame",
+      proceduralText,
+    });
+    skillGameTitleEl.value = "";
+    skillProceduralTextEl.value = "";
+    await refresh();
+  } catch (e) {
+    skillErrorEl.textContent = e.message;
+  }
 };
 
 refresh();
