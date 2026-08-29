@@ -203,20 +203,39 @@ class _LiveStepLogSink:
 
 
 class _StoppableWatchdog:
-    """Phase5のWatchdogを包み、GUIからの「停止」要求もshould_interveneに合流させる。"""
+    """Phase5のWatchdogを包み、GUIからの「停止」要求もshould_interveneに合流させる。
+
+    `last_intervention_reason`でshould_intervene()がTrueを返した理由(ユーザーによる
+    停止か、Phase5の二重条件による自動介入か)を区別できるようにし、GUIが
+    「Watchdogが実際に介入した」ことを検知してTODO再構築のデモ表示に使えるようにする。
+    """
 
     def __init__(self, base: Watchdog):
         self._base = base
         self.stop_requested = False
+        self.last_intervention_reason: str | None = None  # "user_stop" | "watchdog" | None
 
     @property
     def threshold(self) -> int:
         return self._base.threshold
 
+    def reset(self) -> None:
+        self.stop_requested = False
+        self.last_intervention_reason = None
+
     def should_intervene(self, todo: TodoItem, logs: list[StepLog]) -> bool:
         if self.stop_requested:
+            self.last_intervention_reason = "user_stop"
             return True
-        return self._base.should_intervene(todo, logs)
+        if self._base.should_intervene(todo, logs):
+            self.last_intervention_reason = "watchdog"
+            return True
+        return False
+
+    def rebuild_todo(
+        self, current_todos: list[TodoItem], current_todo: TodoItem, logs: list[StepLog]
+    ) -> list[TodoItem]:
+        return self._base.rebuild_todo(current_todos, current_todo, logs)
 
 
 def _default_skill_library() -> dict[str, Skill]:
@@ -241,9 +260,10 @@ class RuntimeState:
         self.observations: dict[str, bytes] = {}
         self.skill_library: dict[str, Skill] = self._load_or_seed_skill_library()
         self._watchdog = _StoppableWatchdog(Watchdog(stall_step_threshold=8))
-        self.status = "idle"  # idle | running | done | stopped | error
+        self.status = "idle"  # idle | running | done | stopped | error | intervened
         self.active_todo_id: str | None = None
         self.error: str | None = None
+        self.last_intervention: dict | None = None
         self._thread: threading.Thread | None = None
         self._current_game: DemoGame | None = None
 
@@ -269,7 +289,12 @@ class RuntimeState:
             self._current_game = None
         return result.todos
 
-    def start_run(self, todo_id: str, max_steps: int = 12) -> None:
+    def start_run(self, todo_id: str, max_steps: int = 12, stall_demo: bool = False) -> None:
+        """stall_demo=Trueの場合、意図的に(現実的な範囲で)完了しないDemoGameを使う。
+        これによりWatchdogの閾値到達による自動介入とTODO再構築を確実に発生させ、
+        その様子をGUI上で確認できるようにする(通常実行では閾値未満で完了することが多く、
+        Watchdogが介入する場面が自然には見えないため)。
+        """
         with self.lock:
             if self.status == "running":
                 raise RuntimeError("既に実行中です。停止してから再度開始してください。")
@@ -281,12 +306,13 @@ class RuntimeState:
             self.status = "running"
             self.active_todo_id = todo_id
             self.error = None
-            self._watchdog.stop_requested = False
+            self._watchdog.reset()
 
         run_id = f"run-{uuid.uuid4().hex[:10]}"
         self.db.start_run(run_id, todo.todoId, todo.description, started_at=_now_iso())
 
-        game = DemoGame(steps_to_win=5, step_delay_sec=0.5)
+        steps_to_win = 999 if stall_demo else 5
+        game = DemoGame(steps_to_win=steps_to_win, step_delay_sec=0.3 if stall_demo else 0.5)
         with self.lock:
             self._current_game = game
 
@@ -299,8 +325,9 @@ class RuntimeState:
                 watchdog=self._watchdog,
                 todo_done_checker=lambda t, obs: game.is_done(),
             )
+            logs: list[StepLog] = []
             try:
-                loop.run(todo, max_steps=max_steps)
+                logs = loop.run(todo, max_steps=max_steps)
             except Exception as exc:
                 with self.lock:
                     self.error = str(exc)
@@ -308,13 +335,34 @@ class RuntimeState:
                 if self.status == "running":
                     if self.error is not None:
                         self.status = "error"
+                    elif self._watchdog.last_intervention_reason == "watchdog":
+                        self.status = "intervened"
                     else:
                         self.status = "stopped" if self._watchdog.stop_requested else "done"
                 final_status = self.status
+            if final_status == "intervened":
+                self._apply_watchdog_rebuild(todo, logs)
             self.db.finish_run(run_id, final_status, finished_at=_now_iso())
 
         self._thread = threading.Thread(target=_run, daemon=True)
         self._thread.start()
+
+    def _apply_watchdog_rebuild(self, stalled_todo: TodoItem, logs: list[StepLog]) -> None:
+        """Watchdogが自動介入した後、Phase5のrebuild_todoでTODOを再構築し、
+        停滞したTODOだけを新しいTODO群に差し替える(他の未完了TODOは残す)。
+        """
+        with self.lock:
+            current_todos = list(self.todos)
+        new_todos = self._watchdog.rebuild_todo(current_todos, stalled_todo, logs)
+        with self.lock:
+            self.todos = [t for t in self.todos if t.todoId != stalled_todo.todoId] + new_todos
+            self.last_intervention = {
+                "todoId": stalled_todo.todoId,
+                "todoDescription": stalled_todo.description,
+                "stepCount": len(logs),
+                "newTodoIds": [t.todoId for t in new_todos],
+                "occurredAt": _now_iso(),
+            }
 
     def stop_run(self) -> None:
         self._watchdog.stop_requested = True
@@ -360,6 +408,7 @@ class RuntimeState:
                 "status": self.status,
                 "activeTodoId": self.active_todo_id,
                 "error": self.error,
+                "lastIntervention": self.last_intervention,
                 "watchdogThreshold": self._watchdog.threshold,
                 "progress": game.progress if game else 0,
                 "stepsToWin": game.steps_to_win if game else 0,
