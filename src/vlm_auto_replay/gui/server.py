@@ -112,5 +112,20 @@ def api_delete_skill(skill_id: str) -> dict:
     return {"ok": True}
 
 
+@app.get("/api/history")
+def api_history() -> dict:
+    """過去の実行(サーバー再起動をまたいでSQLiteに永続化されたもの)の一覧。"""
+    return {"runs": state.list_history()}
+
+
+@app.get("/api/history/{run_id}")
+def api_history_detail(run_id: str) -> dict:
+    run = state.get_history_run(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail=f"実行履歴が見つかりません: {run_id}")
+    logs = state.get_history_logs(run_id)
+    return {"run": run, "logs": [log.model_dump() for log in logs]}
+
+
 # APIルートの後にマウントすることで、/api/* を優先させつつそれ以外を静的フロントエンドとして配信する。
 app.mount("/", StaticFiles(directory=_STATIC_DIR, html=True), name="static")

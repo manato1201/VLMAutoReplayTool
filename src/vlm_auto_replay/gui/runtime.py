@@ -7,10 +7,12 @@
 """
 from __future__ import annotations
 
+import datetime
 import re
 import threading
 import time
 import uuid
+from pathlib import Path
 from typing import Any, ClassVar
 
 from ..actions.skill import Skill
@@ -29,6 +31,11 @@ from ..prompts.schemas import (
     StallDiagnosis,
     TodoItem,
 )
+from .persistence import SqlitePersistence
+
+
+def _now_iso() -> str:
+    return datetime.datetime.now(datetime.UTC).isoformat()
 
 
 class DemoModelClient:
@@ -185,12 +192,14 @@ class _DemoExecutor:
 
 
 class _LiveStepLogSink:
-    def __init__(self, state: RuntimeState):
+    def __init__(self, state: RuntimeState, run_id: str):
         self._state = state
+        self._run_id = run_id
 
     def log_step(self, log: StepLog) -> None:
         with self._state.lock:
             self._state.logs.append(log)
+        self._state.db.append_log(self._run_id, log)
 
 
 class _StoppableWatchdog:
@@ -224,18 +233,29 @@ def _default_skill_library() -> dict[str, Skill]:
 
 
 class RuntimeState:
-    def __init__(self) -> None:
+    def __init__(self, db_path: str | Path | None = None) -> None:
         self.lock = threading.Lock()
+        self.db = SqlitePersistence(db_path)
         self.todos: list[TodoItem] = []
         self.logs: list[StepLog] = []
         self.observations: dict[str, bytes] = {}
-        self.skill_library: dict[str, Skill] = _default_skill_library()
+        self.skill_library: dict[str, Skill] = self._load_or_seed_skill_library()
         self._watchdog = _StoppableWatchdog(Watchdog(stall_step_threshold=8))
-        self.status = "idle"  # idle | running | done | stopped
+        self.status = "idle"  # idle | running | done | stopped | error
         self.active_todo_id: str | None = None
         self.error: str | None = None
         self._thread: threading.Thread | None = None
         self._current_game: DemoGame | None = None
+
+    def _load_or_seed_skill_library(self) -> dict[str, Skill]:
+        loaded = self.db.load_skills()
+        if loaded:
+            return loaded
+        # 初回起動時はデモスキルを1件だけ永続化しておく(2回目以降の起動でも残る)。
+        seed = _default_skill_library()
+        for skill in seed.values():
+            self.db.save_skill(skill)
+        return seed
 
     def decompose(self, goal: str) -> list[TodoItem]:
         result = decompose_goal_to_todo(goal, rag_context=[])
@@ -263,6 +283,9 @@ class RuntimeState:
             self.error = None
             self._watchdog.stop_requested = False
 
+        run_id = f"run-{uuid.uuid4().hex[:10]}"
+        self.db.start_run(run_id, todo.todoId, todo.description, started_at=_now_iso())
+
         game = DemoGame(steps_to_win=5, step_delay_sec=0.5)
         with self.lock:
             self._current_game = game
@@ -271,7 +294,7 @@ class RuntimeState:
             loop = MainLoop(
                 capture=game,
                 observation_store=_StateObservationStore(self),
-                step_log_sink=_LiveStepLogSink(self),
+                step_log_sink=_LiveStepLogSink(self, run_id),
                 executor=_DemoExecutor(game),
                 watchdog=self._watchdog,
                 todo_done_checker=lambda t, obs: game.is_done(),
@@ -283,7 +306,12 @@ class RuntimeState:
                     self.error = str(exc)
             with self.lock:
                 if self.status == "running":
-                    self.status = "stopped" if self._watchdog.stop_requested else "done"
+                    if self.error is not None:
+                        self.status = "error"
+                    else:
+                        self.status = "stopped" if self._watchdog.stop_requested else "done"
+                final_status = self.status
+            self.db.finish_run(run_id, final_status, finished_at=_now_iso())
 
         self._thread = threading.Thread(target=_run, daemon=True)
         self._thread.start()
@@ -306,6 +334,7 @@ class RuntimeState:
         )
         with self.lock:
             self.skill_library[skill.skillId] = skill
+        self.db.save_skill(skill)
         return skill
 
     def remove_skill(self, skill_id: str) -> None:
@@ -313,6 +342,16 @@ class RuntimeState:
             if skill_id not in self.skill_library:
                 raise KeyError(f"未知のskillIdです: {skill_id}")
             del self.skill_library[skill_id]
+        self.db.delete_skill(skill_id)
+
+    def list_history(self, limit: int = 20) -> list[dict]:
+        return self.db.list_runs(limit)
+
+    def get_history_run(self, run_id: str) -> dict | None:
+        return self.db.get_run(run_id)
+
+    def get_history_logs(self, run_id: str) -> list[StepLog]:
+        return self.db.get_run_logs(run_id)
 
     def snapshot(self) -> dict:
         with self.lock:

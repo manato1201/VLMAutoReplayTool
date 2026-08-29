@@ -53,6 +53,13 @@
       <h2 class="panel-title">Watchdog</h2>
       <p class="caption" id="watchdog-info"></p>
     </section>
+
+    <section class="panel panel-wide">
+      <h2 class="panel-title">実行履歴</h2>
+      <p class="caption">SQLiteに永続化されるため、サーバーを再起動しても過去の実行ログを見返せる。</p>
+      <div id="history-list" class="history-list"></div>
+      <div id="history-detail" class="log-feed"></div>
+    </section>
   </main>
 
   <script src="/app.js"></script>

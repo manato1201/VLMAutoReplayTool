@@ -49,7 +49,7 @@ python -m venv .venv
 .venv/Scripts/pytest -q
 ```
 
-`52 passed` と表示されれば、Phase1〜7のコアロジック(型付きプロンプト関数・メインループ・Skill/API実行・RAG境界・Watchdog・スキル抽出・ナビゲーション)とGUI(FastAPIエンドポイント)がすべて正常。
+`55 passed` と表示されれば、Phase1〜7のコアロジック(型付きプロンプト関数・メインループ・Skill/API実行・RAG境界・Watchdog・スキル抽出・ナビゲーション)とGUI(FastAPIエンドポイント+SQLite永続化)がすべて正常。
 
 **3. GUIサーバを起動する**
 
@@ -66,6 +66,8 @@ python -m venv .venv
 3. ヘッダー右上のSTATUSが `RUNNING` → `DONE` に変わることを確認する
 4. 実行中に **停止** ボタンを押すと、その場でSTATUSが `STOPPED` になることを確認する(Watchdogの停止経路の確認)
 5. 「スキルライブラリ」パネルに `demo-skill-1`(procedureスキル)が表示されていることを確認する。ゲーム名+手順テキストを入力して **スキルを追加** すると即座に一覧へ反映され、**削除** で取り除けることも確認する
+6. 「実行履歴」パネルに今実行したRunが表示され、**ログを見る** をクリックするとそのRunのStepLog一覧が下に表示されることを確認する
+7. サーバーをいったん `Ctrl+C` で止めて再度 `python -m vlm_auto_replay.gui` すると、追加したスキルと実行履歴が消えずに残っていることを確認する(`~/.vlm_auto_replay/gui.sqlite3` にSQLiteで永続化されている)
 
 実VLM・実HID(ViGEm/SendInput)を使わない**デモモード**で動くため、APIキーやドライバのセットアップなしにこの一連の流れを確認できる。実モデル/実HIDへの差し替え方は次項参照。
 
