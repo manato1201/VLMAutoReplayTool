@@ -202,3 +202,51 @@ def test_skill_library_survives_runtime_state_restart(tmp_path):
     second.remove_skill(added.skillId)
     third = RuntimeState(db_path=db_path)
     assert added.skillId not in third.skill_library
+
+
+def test_settings_default_hid_backend_is_none(client):
+    settings = client.get("/api/settings").json()["hidBackend"]
+    assert settings["current"] == "none"
+    assert settings["error"] is None
+    names = [opt["name"] for opt in settings["options"]]
+    assert names == ["none", "sendinput", "vigem"]
+
+
+def test_settings_switch_to_sendinput_succeeds_on_windows(client):
+    """SendInputBackendはctypes(標準ライブラリ)のみに依存するため、Windows上では
+    実際にドライバ等なしで構築できる(呼び出しはしない、構築のみ検証)。
+    """
+    resp = client.post("/api/settings/hid-backend", json={"name": "sendinput"})
+    assert resp.status_code == 200
+    assert resp.json()["hidBackend"]["current"] == "sendinput"
+    assert resp.json()["hidBackend"]["error"] is None
+
+    status = client.get("/api/settings").json()["hidBackend"]
+    assert status["current"] == "sendinput"
+
+
+def test_settings_switch_to_vigem_without_vgamepad_returns_422_and_keeps_previous(client):
+    """vgamepadパッケージが未インストールな環境(このテスト環境)では、ViGEmへの切り替えは
+    明確なエラーになり、現在のバックエンドは変更されないままであること。
+    """
+    try:
+        import vgamepad  # noqa: F401
+    except ImportError:
+        pass
+    else:
+        pytest.skip("vgamepadがインストールされている環境では別の検証が必要")
+
+    resp = client.post("/api/settings/hid-backend", json={"name": "vigem"})
+    assert resp.status_code == 422
+    assert "vgamepad" in resp.json()["detail"]
+
+    status = client.get("/api/settings").json()["hidBackend"]
+    assert status["current"] == "none"  # 失敗時は変更されない
+    assert status["error"] is not None
+
+
+def test_settings_switch_to_unknown_backend_returns_400(client):
+    resp = client.post("/api/settings/hid-backend", json={"name": "does-not-exist"})
+    assert resp.status_code == 400
+    # 失敗時は元の設定(none)のまま変わらない。
+    assert client.get("/api/settings").json()["hidBackend"]["current"] == "none"

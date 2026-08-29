@@ -15,6 +15,16 @@ import uuid
 from pathlib import Path
 from typing import Any, ClassVar
 
+from ..actions.api_primitives import (
+    ApiPrimitives,
+    KeyboardMouseBackend,
+    NullKeyboardMouseBackend,
+    NullPadBackend,
+    PadBackend,
+    ScriptedOcrBackend,
+    SendInputBackend,
+    ViGEmPadBackend,
+)
 from ..actions.skill import Skill
 from ..loop.main_loop import MainLoop
 from ..loop.schemas import StepLog
@@ -36,6 +46,31 @@ from .persistence import SqlitePersistence
 
 def _now_iso() -> str:
     return datetime.datetime.now(datetime.UTC).isoformat()
+
+
+HID_BACKEND_LABELS: dict[str, str] = {
+    "none": "未接続(Null、何も実機に作用しない)",
+    "sendinput": "SendInput(実キーボード・マウス操作、ctypes経由)",
+    "vigem": "ViGEm(仮想Xboxパッド、要vgamepad+ViGEmBus)",
+}
+
+
+def _build_hid_backends(name: str) -> tuple[PadBackend, KeyboardMouseBackend]:
+    """選んだバックエンド名からPad/KeyboardMouseの実装ペアを構築する。
+
+    実際に構築するだけで、まだGUIのデモ実行フロー(DemoGame/_DemoExecutor)には
+    接続しない — DemoGame側はHIDを一切経由しない決定的なスタブなので、ここで
+    選んだバックエンドは主に「この環境でPhase3の実HID実装が構築できるか」を
+    その場で確認する目的と、実運用でScreenCapture/ActionExecutorを実キャプチャ・
+    実HIDに差し替える際の設定の起点になる。
+    """
+    if name == "none":
+        return NullPadBackend(), NullKeyboardMouseBackend()
+    if name == "sendinput":
+        return NullPadBackend(), SendInputBackend()
+    if name == "vigem":
+        return ViGEmPadBackend(), NullKeyboardMouseBackend()
+    raise ValueError(f"未知のHIDバックエンドです: {name}")
 
 
 class DemoModelClient:
@@ -266,6 +301,9 @@ class RuntimeState:
         self.last_intervention: dict | None = None
         self._thread: threading.Thread | None = None
         self._current_game: DemoGame | None = None
+        self.hid_backend_name = "none"
+        self.hid_backend_error: str | None = None
+        self.api_primitives = ApiPrimitives(*_build_hid_backends("none"), ScriptedOcrBackend())
 
     def _load_or_seed_skill_library(self) -> dict[str, Skill]:
         loaded = self.db.load_skills()
@@ -366,6 +404,31 @@ class RuntimeState:
 
     def stop_run(self) -> None:
         self._watchdog.stop_requested = True
+
+    def set_hid_backend(self, name: str) -> None:
+        """HIDバックエンドを切り替える。構築に失敗した場合(未インストール/非Windows等)は
+        例外を送出し、現在のバックエンドは変更しない。
+        """
+        if name not in HID_BACKEND_LABELS:
+            raise ValueError(f"未知のHIDバックエンドです: {name}")
+        try:
+            pad, keyboard_mouse = _build_hid_backends(name)
+        except RuntimeError as exc:
+            with self.lock:
+                self.hid_backend_error = str(exc)
+            raise
+        with self.lock:
+            self.hid_backend_name = name
+            self.hid_backend_error = None
+            self.api_primitives = ApiPrimitives(pad, keyboard_mouse, ScriptedOcrBackend())
+
+    def get_hid_settings(self) -> dict:
+        with self.lock:
+            return {
+                "current": self.hid_backend_name,
+                "error": self.hid_backend_error,
+                "options": [{"name": name, "label": label} for name, label in HID_BACKEND_LABELS.items()],
+            }
 
     def get_observation(self, ref: str) -> bytes | None:
         with self.lock:

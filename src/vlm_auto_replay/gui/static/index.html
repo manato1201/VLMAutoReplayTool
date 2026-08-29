@@ -65,6 +65,17 @@
       <div id="history-list" class="history-list"></div>
       <div id="history-detail" class="log-feed"></div>
     </section>
+
+    <section class="panel panel-wide">
+      <h2 class="panel-title">設定: HIDバックエンド</h2>
+      <p class="caption">
+        Phase3の実HID実装(<code>actions/api_primitives.py</code>)をこの環境で実際に構築できるか確認する。
+        デモ実行(StepLog)はDemoGameの決定的スタブを使うため、ここでの選択には影響しない —
+        実運用でScreenCapture/ActionExecutorを実キャプチャに差し替えた際の設定の起点になる。
+      </p>
+      <div id="hid-backend-options" class="hid-backend-options"></div>
+      <span id="hid-backend-error" class="error-text"></span>
+    </section>
   </main>
 
   <script src="/app.js"></script>

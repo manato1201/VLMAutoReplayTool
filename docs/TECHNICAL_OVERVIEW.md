@@ -320,6 +320,8 @@ sequenceDiagram
 | `DELETE /api/skills/{skillId}` | スキルライブラリから削除 |
 | `GET /api/history` | 過去の実行(SQLiteに永続化)の一覧を`startedAt`降順で返す |
 | `GET /api/history/{runId}` | 特定Runのメタデータ+全StepLog |
+| `GET /api/settings` | 現在のHIDバックエンド設定(`current`/`error`/`options`) |
+| `POST /api/settings/hid-backend` | `{name: "none"\|"sendinput"\|"vigem"}` → Phase3の実HID実装を実際に構築して切り替える |
 
 **進捗の可視化**: `DemoGame`は`progress`/`steps_to_win`を公開プロパティとして持ち、`RuntimeState`が実行中のインスタンスを`_current_game`として保持することで`/api/status`から参照できる。フロントエンドはこれをプログレスバーとして描画する。
 
@@ -329,11 +331,13 @@ sequenceDiagram
 
 **Watchdog介入・TODO再構築の可視化**: 通常のデモ実行(`DemoGame(steps_to_win=5)`)はWatchdogの閾値(既定8)に達するより先に完了するため、Phase5の自動介入が自然には起こらない。`POST /api/run/start`に`stallDemo: true`を渡すと、意図的に完了しない`DemoGame(steps_to_win=999)`を使い、Watchdogの閾値到達による介入を確実に発生させる。`_StoppableWatchdog`は`should_intervene()`がTrueを返した理由を`last_intervention_reason`(`"user_stop"` / `"watchdog"`)として記録しており、`"watchdog"`の場合のみ`RuntimeState._apply_watchdog_rebuild()`が`watchdog.rebuild_todo()`(Phase5)を呼び出して停滞したTODOを新しいTODO群に差し替え、`status`を`"intervened"`にする。結果は`/api/status`の`lastIntervention`フィールド(停滞したTODO・ステップ数・新TODOのID一覧)としてGUIのWatchdogパネルにバナー表示される。
 
+**HIDバックエンド選択**(`GET/POST /api/settings*`): `RuntimeState.set_hid_backend()`はPhase3の`ApiPrimitives`を実際に構築し直す(`none`→Null実装、`sendinput`→`SendInputBackend`、`vigem`→`ViGEmPadBackend`)。構築が失敗した場合(`vgamepad`未インストール、非Windows等)は`RuntimeError`を送出しHTTPでは422を返し、`hid_backend_name`は直前の値のまま変更しない。重要な注意点として、この設定はGUIのデモ実行フロー(`DemoGame`/`_DemoExecutor`)には接続されていない — DemoGameはHIDを一切経由しない決定的スタブなので、バックエンドを切り替えてもStepLogの挙動は変わらない。この機能の役割は「この環境でPhase3の実HID実装(依存パッケージ・OS要件を含む)が構築できるか」をその場で確認することと、実運用でScreenCapture/ActionExecutorを実キャプチャ・実HIDに差し替える際の設定の起点を提供することである。
+
 ---
 
 ## 10. テスト戦略
 
-`tests/` 配下、56件。決定的フェイクゲーム(`tests/fixtures/fake_game.py`)を用い、実VLM/実HIDなしでコアフローをエンドツーエンドに近い形で検証する。共有テストダブル(`InMemoryObservationStore`等)は`tests/fixtures/helpers.py`に集約し、テストファイル間の直接importに依存しない。
+`tests/` 配下、60件。決定的フェイクゲーム(`tests/fixtures/fake_game.py`)を用い、実VLM/実HIDなしでコアフローをエンドツーエンドに近い形で検証する。共有テストダブル(`InMemoryObservationStore`等)は`tests/fixtures/helpers.py`に集約し、テストファイル間の直接importに依存しない。
 
 | ファイル | 検証内容 |
 |---|---|
@@ -345,7 +349,7 @@ sequenceDiagram
 | `test_skill_extraction.py` | Phase6: 3ステップ反復→1マージ済みSkill、受け入れゲート |
 | `test_navigation.py` | Phase7: 4段パイプラインの分離、偽陽性防御、状態遷移グラフ整合性、descriptorキャッシュ |
 | `test_final_integration.py` | Final Phase: procedureスキルの非強制性(逸脱の許容) |
-| `test_gui_server.py` | GUI: バリデーション(400/422/404)、デモ完走、進捗・観測画像・スキルCRUD・Watchdog介入と再構築・履歴 |
+| `test_gui_server.py` | GUI: バリデーション(400/422/404)、デモ完走、進捗・観測画像・スキルCRUD・Watchdog介入と再構築・履歴・HIDバックエンド設定 |
 
 ```bash
 .venv/Scripts/pytest -q

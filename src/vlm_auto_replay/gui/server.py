@@ -55,6 +55,10 @@ class AddSkillRequest(BaseModel):
     proceduralText: str = Field(min_length=1)
 
 
+class HidBackendRequest(BaseModel):
+    name: str
+
+
 @app.get("/api/status")
 def api_status() -> dict:
     return state.snapshot()
@@ -126,6 +130,23 @@ def api_history_detail(run_id: str) -> dict:
         raise HTTPException(status_code=404, detail=f"実行履歴が見つかりません: {run_id}")
     logs = state.get_history_logs(run_id)
     return {"run": run, "logs": [log.model_dump() for log in logs]}
+
+
+@app.get("/api/settings")
+def api_settings() -> dict:
+    return {"hidBackend": state.get_hid_settings()}
+
+
+@app.post("/api/settings/hid-backend")
+def api_set_hid_backend(req: HidBackendRequest) -> dict:
+    try:
+        state.set_hid_backend(req.name)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        # 依存パッケージ未インストール/非Windows等、この環境では構築できないことを示す。
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"hidBackend": state.get_hid_settings()}
 
 
 # APIルートの後にマウントすることで、/api/* を優先させつつそれ以外を静的フロントエンドとして配信する。
