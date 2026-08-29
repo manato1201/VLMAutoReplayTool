@@ -49,7 +49,7 @@ python -m venv .venv
 .venv/Scripts/pytest -q
 ```
 
-`56 passed` と表示されれば、Phase1〜7のコアロジック(型付きプロンプト関数・メインループ・Skill/API実行・RAG境界・Watchdog・スキル抽出・ナビゲーション)とGUI(FastAPIエンドポイント+SQLite永続化)がすべて正常。
+`60 passed` と表示されれば、Phase1〜7のコアロジック(型付きプロンプト関数・メインループ・Skill/API実行・RAG境界・Watchdog・スキル抽出・ナビゲーション)とGUI(FastAPIエンドポイント+SQLite永続化)がすべて正常。
 
 **3. GUIサーバを起動する**
 
@@ -69,6 +69,7 @@ python -m venv .venv
 6. 「実行履歴」パネルに今実行したRunが表示され、**ログを見る** をクリックするとそのRunのStepLog一覧が下に表示されることを確認する
 7. サーバーをいったん `Ctrl+C` で止めて再度 `python -m vlm_auto_replay.gui` すると、追加したスキルと実行履歴が消えずに残っていることを確認する(`~/.vlm_auto_replay/gui.sqlite3` にSQLiteで永続化されている)
 8. 別のTODOで「🐢 Watchdog介入をデモする」にチェックを入れてから **実行開始** をクリックすると、意図的に完了しないゲームに対してWatchdogが8ステップで自動介入し、STATUSが `INTERVENED` になる。Watchdogパネルに介入理由のバナーが表示され、「ゴール分解」パネルのTODOリストが自動で再構築された新しいTODOに置き換わることを確認する
+9. 「設定: HIDバックエンド」パネルで `SendInput` を選ぶと、この環境で実際にPhase3のHID実装が構築できることを確認できる(Windows上ではctypesのみで構築でき、クリックしても実際にキー入力やマウス移動は発生しない)。`ViGEm` を選ぶと、`vgamepad`パッケージ未インストールの場合は「vgamepad が未インストールです」という明確なエラーが表示され、選択は直前の状態のまま変わらないことを確認する
 
 実VLM・実HID(ViGEm/SendInput)を使わない**デモモード**で動くため、APIキーやドライバのセットアップなしにこの一連の流れを確認できる。実モデル/実HIDへの差し替え方は次項参照。
 

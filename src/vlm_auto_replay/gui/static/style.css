@@ -80,6 +80,37 @@ body {
   cursor: pointer;
 }
 
+.hid-backend-options {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.hid-backend-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--surface-night);
+  border: 1px solid var(--hairline-violet);
+  border-radius: 8px;
+  padding: 10px 12px;
+  cursor: pointer;
+}
+
+.hid-backend-option.selected {
+  border-color: var(--accent-lime);
+}
+
+.hid-backend-option input {
+  flex-shrink: 0;
+}
+
+.hid-backend-option .todo-desc {
+  font-size: 14px;
+  font-weight: 500;
+}
+
 .intervention-banner {
   margin-top: 12px;
   background: var(--surface-night);

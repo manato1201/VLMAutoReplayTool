@@ -436,15 +436,19 @@ sequenceDiagram
       <tr><td><code>DELETE /api/skills/{skillId}</code></td><td>スキルライブラリから削除</td></tr>
       <tr><td><code>GET /api/history</code></td><td>過去の実行(SQLite永続化)の一覧をstartedAt降順で返す</td></tr>
       <tr><td><code>GET /api/history/{runId}</code></td><td>特定Runのメタデータ+全StepLog</td></tr>
+      <tr><td><code>GET /api/settings</code></td><td>現在のHIDバックエンド設定(current/error/options)</td></tr>
+      <tr><td><code>POST /api/settings/hid-backend</code></td><td>name(none/sendinput/vigem) → Phase3の実HID実装を構築して切り替え</td></tr>
     </table>
     <p><strong>進捗の可視化</strong>: <code>DemoGame.progress</code>/<code>steps_to_win</code>を<code>RuntimeState</code>が実行中インスタンス経由で公開し、フロントエンドがプログレスバーとして描画する。</p>
     <p><strong>画像プレビュー</strong>: 観測バイト列は<code>RuntimeState.observations</code>に保存され、<code>/api/observation/{ref}</code>が<code>render_observation_svg()</code>でサムネイルSVGへ変換して返す。実運用で実キャプチャに差し替えた場合は、このエンドポイントがバイト列をそのまま返すだけでよい構造。</p>
     <p><strong>セッションの永続化</strong>(<code>gui/persistence.py::SqlitePersistence</code>): スキルライブラリと実行履歴をSQLite(<code>~/.vlm_auto_replay/gui.sqlite3</code>)に永続化し、サーバー再起動後も残る。<code>skills</code>/<code>runs</code>/<code>run_logs</code>の3テーブルのみで、マイグレーション機構は持たない。</p>
+    <p><strong>Watchdog介入・TODO再構築の可視化</strong>: 通常のデモ実行は閾値(既定8)に達する前に完了するため介入が自然には見えない。<code>stallDemo: true</code>で意図的に完了しないDemoGameを使い、介入と<code>rebuild_todo()</code>による再構築を確実に発生させ、結果を<code>lastIntervention</code>としてバナー表示する。</p>
+    <p><strong>HIDバックエンド選択</strong>: <code>RuntimeState.set_hid_backend()</code>はPhase3の<code>ApiPrimitives</code>を実際に構築し直す(none→Null、sendinput→SendInputBackend、vigem→ViGEmPadBackend)。構築失敗時(未インストール/非Windows等)は422を返し設定は変更しない。デモ実行フロー(DemoGame)はHIDを経由しないため、この設定はStepLogの挙動には影響しない — この環境でPhase3の実装が構築できるかの確認と、実運用差し替えの起点を提供する。</p>
   </section>
 
   <section id="tests">
     <h2>10. テスト戦略</h2>
-    <p>決定的フェイクゲームを用い、実VLM/実HIDなしでコアフローを検証する56件のテスト。</p>
+    <p>決定的フェイクゲームを用い、実VLM/実HIDなしでコアフローを検証する60件のテスト。</p>
     <table>
       <tr><th>ファイル</th><th>検証内容</th></tr>
       <tr><td><code>test_prompts.py</code></td><td>Phase1: 9関数の型付き入出力、モデル差し替え可能性</td></tr>
@@ -455,7 +459,7 @@ sequenceDiagram
       <tr><td><code>test_skill_extraction.py</code></td><td>Phase6: 3ステップ反復→1マージ済みSkill</td></tr>
       <tr><td><code>test_navigation.py</code></td><td>Phase7: 4段パイプライン、偽陽性防御、descriptorキャッシュ</td></tr>
       <tr><td><code>test_final_integration.py</code></td><td>Final Phase: procedureスキルの非強制性</td></tr>
-      <tr><td><code>test_gui_server.py</code></td><td>GUI: バリデーション、デモ完走、進捗・観測画像・スキルCRUD・Watchdog介入と再構築</td></tr>
+      <tr><td><code>test_gui_server.py</code></td><td>GUI: バリデーション、デモ完走、進捗・観測画像・スキルCRUD・Watchdog介入と再構築・HID設定</td></tr>
     </table>
     <pre class="codeblock">.venv/Scripts/pytest -q</pre>
   </section>

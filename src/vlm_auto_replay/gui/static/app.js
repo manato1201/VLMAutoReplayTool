@@ -17,6 +17,8 @@ const historyListEl = document.getElementById("history-list");
 const historyDetailEl = document.getElementById("history-detail");
 const stallDemoCheckbox = document.getElementById("stall-demo-checkbox");
 const interventionBannerEl = document.getElementById("intervention-banner");
+const hidBackendOptionsEl = document.getElementById("hid-backend-options");
+const hidBackendErrorEl = document.getElementById("hid-backend-error");
 
 async function postJson(url, body) {
   const res = await fetch(url, {
@@ -181,6 +183,39 @@ function renderHistory(runs) {
   }
 }
 
+function renderHidBackendOptions(hidBackend) {
+  hidBackendOptionsEl.innerHTML = "";
+  for (const option of hidBackend.options) {
+    const label = document.createElement("label");
+    label.className = "hid-backend-option" + (option.name === hidBackend.current ? " selected" : "");
+
+    const radio = document.createElement("input");
+    radio.type = "radio";
+    radio.name = "hid-backend";
+    radio.value = option.name;
+    radio.checked = option.name === hidBackend.current;
+    radio.onchange = async () => {
+      hidBackendErrorEl.textContent = "";
+      try {
+        await postJson("/api/settings/hid-backend", { name: option.name });
+        await refresh();
+      } catch (e) {
+        hidBackendErrorEl.textContent = e.message;
+        await refresh(); // 失敗時も現在の選択状態(ラジオ)を最新化する
+      }
+    };
+
+    const text = document.createElement("span");
+    text.className = "todo-desc";
+    text.textContent = option.label;
+
+    label.appendChild(radio);
+    label.appendChild(text);
+    hidBackendOptionsEl.appendChild(label);
+  }
+  hidBackendErrorEl.textContent = hidBackend.error || "";
+}
+
 function escapeHtml(value) {
   return String(value)
     .replaceAll("&", "&amp;")
@@ -222,6 +257,10 @@ async function refresh() {
   const historyRes = await fetch("/api/history");
   const history = await historyRes.json();
   renderHistory(history.runs);
+
+  const settingsRes = await fetch("/api/settings");
+  const settings = await settingsRes.json();
+  renderHidBackendOptions(settings.hidBackend);
 }
 
 decomposeBtn.onclick = async () => {
