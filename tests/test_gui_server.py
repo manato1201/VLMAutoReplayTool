@@ -19,14 +19,18 @@ from vlm_auto_replay.prompts.model_client import reset_model_client
 @pytest.fixture
 def client():
     reset_model_client()
+    from vlm_auto_replay.gui.runtime import _default_skill_library
     from vlm_auto_replay.gui.server import app, state
 
     # 前のテストの実行結果が残らないよう、テストごとに状態を初期化する。
     state.todos = []
     state.logs = []
+    state.observations = {}
+    state.skill_library = _default_skill_library()
     state.status = "idle"
     state.active_todo_id = None
     state.error = None
+    state._current_game = None
 
     with TestClient(app) as c:
         yield c
@@ -74,3 +78,45 @@ def test_full_demo_run_reaches_done_with_live_logs(client):
     assert status["logs"][0]["reasoning"]
     assert status["watchdogThreshold"] == 8
     assert len(status["skills"]) == 1
+    assert status["stepsToWin"] == 5
+    assert status["progress"] == status["stepsToWin"]  # 完走後は進捗が最大値に達している
+
+    # StepLogのobservationRefが実際に画像(SVG)として取得できること。
+    obs_resp = client.get(f"/api/observation/{status['logs'][0]['observationRef']}")
+    assert obs_resp.status_code == 200
+    assert obs_resp.headers["content-type"].startswith("image/svg+xml")
+    assert b"<svg" in obs_resp.content
+
+
+def test_observation_endpoint_returns_404_for_unknown_ref(client):
+    resp = client.get("/api/observation/does-not-exist")
+    assert resp.status_code == 404
+
+
+def test_add_and_delete_skill(client):
+    resp = client.post("/api/skills", json={"gameTitle": "MyGame", "proceduralText": "1. attack\n2. heal"})
+    assert resp.status_code == 200
+    skill = resp.json()["skill"]
+    assert skill["gameTitle"] == "MyGame"
+    assert skill["type"] == "procedure"
+    assert skill["createdBy"] == "manual"
+
+    status = client.get("/api/status").json()
+    skill_ids = [s["skillId"] for s in status["skills"]]
+    assert skill["skillId"] in skill_ids
+    assert len(status["skills"]) == 2  # 既定のdemo-skill-1 + 追加した1件
+
+    resp = client.delete(f"/api/skills/{skill['skillId']}")
+    assert resp.status_code == 200
+    status = client.get("/api/status").json()
+    assert skill["skillId"] not in [s["skillId"] for s in status["skills"]]
+
+
+def test_add_skill_rejects_empty_procedural_text(client):
+    resp = client.post("/api/skills", json={"gameTitle": "MyGame", "proceduralText": "   "})
+    assert resp.status_code == 400
+
+
+def test_delete_unknown_skill_returns_404(client):
+    resp = client.delete("/api/skills/does-not-exist")
+    assert resp.status_code == 404

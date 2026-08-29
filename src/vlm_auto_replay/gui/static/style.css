@@ -107,6 +107,37 @@ body {
   margin-bottom: 16px;
 }
 
+.progress-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.progress-track {
+  flex: 1;
+  height: 10px;
+  background: var(--hairline-violet);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.progress-bar {
+  height: 100%;
+  width: 0%;
+  background: var(--accent-lime);
+  border-radius: 999px;
+  transition: width 0.3s ease;
+}
+
+.progress-label {
+  font-family: "Monaco", "Menlo", "Ubuntu Mono", monospace;
+  font-size: 12px;
+  color: var(--on-dark-muted);
+  min-width: 48px;
+  text-align: right;
+}
+
 .text-input {
   flex: 1;
   background: #ffffff;
@@ -211,10 +242,26 @@ body {
 }
 
 .log-entry {
+  display: flex;
+  gap: 12px;
   background: var(--surface-night);
   border: 1px solid var(--hairline-violet);
   border-radius: 8px;
   padding: 12px;
+}
+
+.log-thumb {
+  flex-shrink: 0;
+  width: 96px;
+  height: 54px;
+  border-radius: 6px;
+  border: 1px solid var(--hairline-violet);
+  object-fit: cover;
+}
+
+.log-body {
+  min-width: 0;
+  flex: 1;
 }
 
 .log-step {
@@ -241,4 +288,40 @@ body {
 .empty-hint {
   color: var(--on-dark-muted);
   font-size: 14px;
+}
+
+.skill-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.skill-textarea {
+  resize: vertical;
+  font-family: "Monaco", "Menlo", "Ubuntu Mono", monospace;
+  font-size: 13px;
+}
+
+.skill-card {
+  align-items: flex-start;
+}
+
+.skill-procedural-text {
+  font-family: "Monaco", "Menlo", "Ubuntu Mono", monospace;
+  font-size: 12px;
+  color: var(--on-dark-muted);
+  white-space: pre-wrap;
+  margin: 4px 0 0;
+}
+
+.btn-delete {
+  background: transparent;
+  color: var(--accent-pink);
+  border: 1px solid var(--accent-pink);
+  border-radius: 8px;
+  padding: 4px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  flex-shrink: 0;
 }

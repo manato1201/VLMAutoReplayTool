@@ -305,24 +305,41 @@ sequenceDiagram
 
 フロントエンド(`gui/static/`)は `VLMAutoReplayTool_UI_DESIGN.md`(Sentri風トークン)の配色・タイポグラフィに準拠: ダークキャンバス(`surface-night` #150f23)、カードは `ink-deep` #1f1633+`hairline-violet`境界線、ゴールキーワードに `accent-lime` #c2ef4e のチップ、フォントはRubik、StepLogのaction/summary表示はMonaco系コードフォント。
 
-実運用のモデル/HIDに差し替える場合は、`vlm_auto_replay.gui.server` をimportする前に `configure_model_client()` で実クライアントを設定しておけばよい(`server.py` の `_ensure_model_client_configured()` が既存設定を尊重し、未設定時のみデモ実装にフォールバックする)。
+実運用のモデル/HIDに差し替える場合は、`vlm_auto_replay.gui.server` をimportする前に `configure_model_client()` で実クライアントを設定しておけばよい(`server.py` の `_ensure_model_client_configured()` が既存設定を尊重し、未設定時のみデモ実装にフォールバックする。呼び出しはimport時ではなくFastAPIのlifespanハンドラで行い、importするだけでグローバル状態が変わらないようにしている)。
+
+### 9.1 APIエンドポイント一覧
+
+| メソッド/パス | 内容 |
+|---|---|
+| `GET /api/status` | 現在の状態のスナップショット(`status`/`progress`/`stepsToWin`/`todos`/`logs`/`skills`/`watchdogThreshold`/`error`) |
+| `POST /api/todo/decompose` | `{goal}` → `decompose_goal_to_todo`を呼び出しTODOを生成 |
+| `POST /api/run/start` | `{todoId, maxSteps}` → `MainLoop.run`をバックグラウンドスレッドで開始 |
+| `POST /api/run/stop` | `_StoppableWatchdog.stop_requested`を立て、次ステップ末尾で停止させる |
+| `GET /api/observation/{ref}` | StepLog.observationRefに対応するサムネイル画像(SVG)を返す |
+| `POST /api/skills` | `{gameTitle, proceduralText}` → procedureスキルを追加(`createdBy="manual"`) |
+| `DELETE /api/skills/{skillId}` | スキルライブラリから削除 |
+
+**進捗の可視化**: `DemoGame`は`progress`/`steps_to_win`を公開プロパティとして持ち、`RuntimeState`が実行中のインスタンスを`_current_game`として保持することで`/api/status`から参照できる。フロントエンドはこれをプログレスバーとして描画する。
+
+**StepLogの画像プレビュー**: `MainLoop`が呼ぶ`ObservationStore.store()`の実装(`_StateObservationStore`)は、観測バイト列を`RuntimeState.observations`辞書に保存し`obs-xxxxxxxx`形式の参照キーを返す。`GET /api/observation/{ref}`はこれを取り出し、`render_observation_svg()`でサムネイルSVGに変換して返す。DemoGameの観測形式(`progress=X/Y`というテキスト)を前提にした合成描画であることを明記しており、実運用でScreenCaptureを実キャプチャに差し替えた場合は、`observationRef`が実際のスクリーンショットバイト列/URLを指すため、このエンドポイントは合成描画を経由せずバイト列をそのまま返すだけでよい。
 
 ---
 
 ## 10. テスト戦略
 
-`tests/` 配下、40件。決定的フェイクゲーム(`tests/fixtures/fake_game.py`)を用い、実VLM/実HIDなしでコアフローをエンドツーエンドに近い形で検証する。
+`tests/` 配下、52件。決定的フェイクゲーム(`tests/fixtures/fake_game.py`)を用い、実VLM/実HIDなしでコアフローをエンドツーエンドに近い形で検証する。共有テストダブル(`InMemoryObservationStore`等)は`tests/fixtures/helpers.py`に集約し、テストファイル間の直接importに依存しない。
 
 | ファイル | 検証内容 |
 |---|---|
 | `test_prompts.py` | Phase1: 9関数の型付き入出力、モデル差し替え可能性 |
 | `test_main_loop.py` | Phase2: 決定的完走、状態変化駆動の進行、`stepIndex`の単調性、reasoning必須 |
-| `test_watchdog.py` | Phase5: 二重条件、再構築スコープの厳密化 |
-| `test_skill_runner.py` | Phase3: procedure/script二層、サンドボックス、ActionDispatcher |
+| `test_watchdog.py` | Phase5: 二重条件、再構築スコープの厳密化、`threshold`公開プロパティ |
+| `test_skill_runner.py` | Phase3: procedure/script二層、サンドボックス、ActionDispatcherのホワイトリスト、main_loop未設定時のエラー |
 | `test_rag_boundary.py` | Phase4: RAG境界のAST静的解析+コールカウント実証 |
 | `test_skill_extraction.py` | Phase6: 3ステップ反復→1マージ済みSkill、受け入れゲート |
-| `test_navigation.py` | Phase7: 4段パイプラインの分離、偽陽性防御、状態遷移グラフ整合性 |
+| `test_navigation.py` | Phase7: 4段パイプラインの分離、偽陽性防御、状態遷移グラフ整合性、descriptorキャッシュ |
 | `test_final_integration.py` | Final Phase: procedureスキルの非強制性(逸脱の許容) |
+| `test_gui_server.py` | GUI: バリデーション(400/422/404)、デモ実行の完走、進捗・観測画像・スキルCRUD |
 
 ```bash
 .venv/Scripts/pytest -q

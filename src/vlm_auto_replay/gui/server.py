@@ -8,12 +8,12 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from ..prompts.model_client import configure_model_client, get_model_client
-from .runtime import DemoModelClient, RuntimeState
+from .runtime import DemoModelClient, RuntimeState, render_observation_svg
 
 _STATIC_DIR = Path(__file__).parent / "static"
 
@@ -49,6 +49,11 @@ class StartRunRequest(BaseModel):
     maxSteps: int = Field(default=12, ge=1, le=200)
 
 
+class AddSkillRequest(BaseModel):
+    gameTitle: str = Field(default="MyGame", min_length=1)
+    proceduralText: str = Field(min_length=1)
+
+
 @app.get("/api/status")
 def api_status() -> dict:
     return state.snapshot()
@@ -79,6 +84,31 @@ def api_start_run(req: StartRunRequest) -> dict:
 @app.post("/api/run/stop")
 def api_stop_run() -> dict:
     state.stop_run()
+    return {"ok": True}
+
+
+@app.get("/api/observation/{ref}")
+def api_observation(ref: str) -> Response:
+    observation = state.get_observation(ref)
+    if observation is None:
+        raise HTTPException(status_code=404, detail=f"観測データが見つかりません: {ref}")
+    return Response(content=render_observation_svg(observation), media_type="image/svg+xml")
+
+
+@app.post("/api/skills")
+def api_add_skill(req: AddSkillRequest) -> dict:
+    if not req.proceduralText.strip():
+        raise HTTPException(status_code=400, detail="proceduralTextは空にできません。")
+    skill = state.add_skill(req.gameTitle.strip() or "MyGame", req.proceduralText)
+    return {"skill": skill.model_dump()}
+
+
+@app.delete("/api/skills/{skill_id}")
+def api_delete_skill(skill_id: str) -> dict:
+    try:
+        state.remove_skill(skill_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     return {"ok": True}
 
 
