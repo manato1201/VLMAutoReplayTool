@@ -313,7 +313,7 @@ sequenceDiagram
 |---|---|
 | `GET /api/status` | 現在の状態のスナップショット(`status`/`progress`/`stepsToWin`/`todos`/`logs`/`skills`/`watchdogThreshold`/`error`) |
 | `POST /api/todo/decompose` | `{goal}` → `decompose_goal_to_todo`を呼び出しTODOを生成 |
-| `POST /api/run/start` | `{todoId, maxSteps}` → `MainLoop.run`をバックグラウンドスレッドで開始 |
+| `POST /api/run/start` | `{todoId, maxSteps, stallDemo}` → `MainLoop.run`をバックグラウンドスレッドで開始 |
 | `POST /api/run/stop` | `_StoppableWatchdog.stop_requested`を立て、次ステップ末尾で停止させる |
 | `GET /api/observation/{ref}` | StepLog.observationRefに対応するサムネイル画像(SVG)を返す |
 | `POST /api/skills` | `{gameTitle, proceduralText}` → procedureスキルを追加(`createdBy="manual"`) |
@@ -327,11 +327,13 @@ sequenceDiagram
 
 **セッションの永続化**(`gui/persistence.py::SqlitePersistence`): 以前はGUIの状態が全てインメモリでサーバー再起動により消えていた。スキルライブラリと実行履歴(Run+StepLog)をSQLite(`~/.vlm_auto_replay/gui.sqlite3`、テストでは`:memory:`または`tmp_path`)に永続化する。`RuntimeState.start_run`はスレッド起動前に同期的に`runs`テーブルへ行を作成するため、実行中のRunも`/api/history`に即座に現れる。各StepLogは`_LiveStepLogSink.log_step`でインメモリの`self.logs`へのappendと同時に`db.append_log()`で永続化される。スキーマは`skills` / `runs` / `run_logs`の3テーブルのみで、マイグレーション機構は持たない(`CREATE TABLE IF NOT EXISTS`のみ)。実行履歴は将来的に`extract_experience`(Phase1)の入力データ源として使える設計だが、自動投入は未実装(反復ポイント)。
 
+**Watchdog介入・TODO再構築の可視化**: 通常のデモ実行(`DemoGame(steps_to_win=5)`)はWatchdogの閾値(既定8)に達するより先に完了するため、Phase5の自動介入が自然には起こらない。`POST /api/run/start`に`stallDemo: true`を渡すと、意図的に完了しない`DemoGame(steps_to_win=999)`を使い、Watchdogの閾値到達による介入を確実に発生させる。`_StoppableWatchdog`は`should_intervene()`がTrueを返した理由を`last_intervention_reason`(`"user_stop"` / `"watchdog"`)として記録しており、`"watchdog"`の場合のみ`RuntimeState._apply_watchdog_rebuild()`が`watchdog.rebuild_todo()`(Phase5)を呼び出して停滞したTODOを新しいTODO群に差し替え、`status`を`"intervened"`にする。結果は`/api/status`の`lastIntervention`フィールド(停滞したTODO・ステップ数・新TODOのID一覧)としてGUIのWatchdogパネルにバナー表示される。
+
 ---
 
 ## 10. テスト戦略
 
-`tests/` 配下、55件。決定的フェイクゲーム(`tests/fixtures/fake_game.py`)を用い、実VLM/実HIDなしでコアフローをエンドツーエンドに近い形で検証する。共有テストダブル(`InMemoryObservationStore`等)は`tests/fixtures/helpers.py`に集約し、テストファイル間の直接importに依存しない。
+`tests/` 配下、56件。決定的フェイクゲーム(`tests/fixtures/fake_game.py`)を用い、実VLM/実HIDなしでコアフローをエンドツーエンドに近い形で検証する。共有テストダブル(`InMemoryObservationStore`等)は`tests/fixtures/helpers.py`に集約し、テストファイル間の直接importに依存しない。
 
 | ファイル | 検証内容 |
 |---|---|
@@ -343,7 +345,7 @@ sequenceDiagram
 | `test_skill_extraction.py` | Phase6: 3ステップ反復→1マージ済みSkill、受け入れゲート |
 | `test_navigation.py` | Phase7: 4段パイプラインの分離、偽陽性防御、状態遷移グラフ整合性、descriptorキャッシュ |
 | `test_final_integration.py` | Final Phase: procedureスキルの非強制性(逸脱の許容) |
-| `test_gui_server.py` | GUI: バリデーション(400/422/404)、デモ実行の完走、進捗・観測画像・スキルCRUD |
+| `test_gui_server.py` | GUI: バリデーション(400/422/404)、デモ完走、進捗・観測画像・スキルCRUD・Watchdog介入と再構築・履歴 |
 
 ```bash
 .venv/Scripts/pytest -q

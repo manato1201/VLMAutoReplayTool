@@ -15,6 +15,8 @@ const addSkillBtn = document.getElementById("add-skill-btn");
 const skillErrorEl = document.getElementById("skill-error");
 const historyListEl = document.getElementById("history-list");
 const historyDetailEl = document.getElementById("history-detail");
+const stallDemoCheckbox = document.getElementById("stall-demo-checkbox");
+const interventionBannerEl = document.getElementById("intervention-banner");
 
 async function postJson(url, body) {
   const res = await fetch(url, {
@@ -56,7 +58,11 @@ function renderTodos(todos, activeTodoId, status) {
     btn.onclick = async () => {
       runErrorEl.textContent = "";
       try {
-        await postJson("/api/run/start", { todoId: todo.todoId, maxSteps: 12 });
+        await postJson("/api/run/start", {
+          todoId: todo.todoId,
+          maxSteps: 12,
+          stallDemo: stallDemoCheckbox.checked,
+        });
       } catch (e) {
         runErrorEl.textContent = e.message;
       }
@@ -188,6 +194,7 @@ async function refresh() {
 
   statusPill.textContent = `STATUS: ${snapshot.status.toUpperCase()}`;
   statusPill.classList.toggle("running", snapshot.status === "running");
+  statusPill.classList.toggle("intervened", snapshot.status === "intervened");
   statusPill.classList.toggle("error", snapshot.status === "error");
 
   renderTodos(snapshot.todos, snapshot.activeTodoId, snapshot.status);
@@ -196,6 +203,16 @@ async function refresh() {
   renderSkills(snapshot.skills);
 
   watchdogInfoEl.textContent = `同一TODO継続ステップ数がしきい値(${snapshot.watchdogThreshold})に達するか、diagnose_stallが回復不能と判断すると自動でTODOを再構築します。`;
+
+  if (snapshot.lastIntervention) {
+    const iv = snapshot.lastIntervention;
+    interventionBannerEl.hidden = false;
+    interventionBannerEl.textContent =
+      `⚠ Watchdogが介入しました: 「${iv.todoDescription}」が${iv.stepCount}ステップ継続したため、` +
+      `${iv.newTodoIds.length}件の新しいTODOへ再構築しました(${iv.occurredAt})。`;
+  } else {
+    interventionBannerEl.hidden = true;
+  }
 
   stopBtn.disabled = snapshot.status !== "running";
   if (snapshot.error) {

@@ -89,6 +89,44 @@ def test_observation_endpoint_returns_404_for_unknown_ref(client):
     assert resp.status_code == 404
 
 
+def test_stall_demo_triggers_watchdog_intervention_and_rebuilds_todo(client):
+    """stallDemo=Trueは意図的に完了しないゲームを使い、Watchdogの閾値到達による
+    自動介入とTODO再構築(rebuild_todo)を確実に発生させる。
+    """
+    resp = client.post("/api/todo/decompose", json={"goal": "介入テスト"})
+    todos = resp.json()["todos"]
+    stalled_todo = todos[0]
+
+    resp = client.post("/api/run/start", json={"todoId": stalled_todo["todoId"], "maxSteps": 20, "stallDemo": True})
+    assert resp.status_code == 200
+
+    deadline = time.monotonic() + 15
+    status = client.get("/api/status").json()
+    while status["status"] == "running" and time.monotonic() < deadline:
+        time.sleep(0.2)
+        status = client.get("/api/status").json()
+
+    assert status["status"] == "intervened"
+    assert len(status["logs"]) == status["watchdogThreshold"]  # 閾値到達で即座に介入する
+
+    intervention = status["lastIntervention"]
+    assert intervention is not None
+    assert intervention["todoId"] == stalled_todo["todoId"]
+    assert intervention["stepCount"] == status["watchdogThreshold"]
+    assert len(intervention["newTodoIds"]) > 0
+
+    # 停滞したTODOは新しいTODO群に差し替えられ、他の未完了TODO(2件)は残る。
+    remaining_ids = [t["todoId"] for t in status["todos"]]
+    assert stalled_todo["todoId"] not in remaining_ids
+    assert all(new_id in remaining_ids for new_id in intervention["newTodoIds"])
+    assert todos[1]["todoId"] in remaining_ids
+    assert todos[2]["todoId"] in remaining_ids
+
+    # 実行履歴側でもstatus="intervened"として記録されていること。
+    history = client.get("/api/history").json()["runs"]
+    assert history[0]["status"] == "intervened"
+
+
 def test_add_and_delete_skill(client):
     resp = client.post("/api/skills", json={"gameTitle": "MyGame", "proceduralText": "1. attack\n2. heal"})
     assert resp.status_code == 200

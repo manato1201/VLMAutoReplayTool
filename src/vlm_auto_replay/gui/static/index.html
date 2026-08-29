@@ -32,6 +32,10 @@
       </div>
       <div class="row">
         <button id="stop-btn" class="btn-ghost" disabled>停止</button>
+        <label class="checkbox-label">
+          <input type="checkbox" id="stall-demo-checkbox" />
+          🐢 Watchdog介入をデモする(意図的に停滞させる)
+        </label>
         <span id="run-error" class="error-text"></span>
       </div>
       <div id="log-feed" class="log-feed"></div>
@@ -52,6 +56,7 @@
     <section class="panel">
       <h2 class="panel-title">Watchdog</h2>
       <p class="caption" id="watchdog-info"></p>
+      <div id="intervention-banner" class="intervention-banner" hidden></div>
     </section>
 
     <section class="panel panel-wide">

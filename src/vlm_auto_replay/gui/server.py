@@ -47,6 +47,7 @@ class DecomposeRequest(BaseModel):
 class StartRunRequest(BaseModel):
     todoId: str
     maxSteps: int = Field(default=12, ge=1, le=200)
+    stallDemo: bool = False
 
 
 class AddSkillRequest(BaseModel):
@@ -75,7 +76,7 @@ def api_decompose(req: DecomposeRequest) -> dict:
 @app.post("/api/run/start")
 def api_start_run(req: StartRunRequest) -> dict:
     try:
-        state.start_run(req.todoId, req.maxSteps)
+        state.start_run(req.todoId, req.maxSteps, stall_demo=req.stallDemo)
     except (KeyError, RuntimeError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"ok": True}
