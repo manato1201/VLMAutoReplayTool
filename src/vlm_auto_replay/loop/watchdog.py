@@ -17,6 +17,10 @@ class Watchdog:
     def __init__(self, stall_step_threshold: int = 15):
         self._threshold = stall_step_threshold
 
+    @property
+    def threshold(self) -> int:
+        return self._threshold
+
     def should_intervene(self, todo: TodoItem, logs: list[StepLog]) -> bool:
         same_todo_logs = [log for log in logs if log.todoId == todo.todoId]
 
@@ -52,8 +56,6 @@ class Watchdog:
 
     @staticmethod
     def _reconstruct_goal(current_todos: list[TodoItem], current_todo: TodoItem) -> str:
-        others = ", ".join(
-            t.description for t in current_todos if t.todoId != current_todo.todoId
-        )
+        others = ", ".join(t.description for t in current_todos if t.todoId != current_todo.todoId)
         base = f"次のTODOで停滞したため再計画する: {current_todo.description}"
         return f"{base}(他の未完了TODO: {others})" if others else base

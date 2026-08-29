@@ -12,7 +12,7 @@ from __future__ import annotations
 import ctypes
 import sys
 import time
-from typing import Protocol
+from typing import ClassVar, Protocol
 
 
 class PadBackend(Protocol):
@@ -34,7 +34,7 @@ class OcrBackend(Protocol):
 class ViGEmPadBackend:
     """ViGEm経由の仮想XInputパッド。`pip install vgamepad` + ViGEmBusドライバが必要。"""
 
-    _BUTTON_ATTR_MAP = {
+    _BUTTON_ATTR_MAP: ClassVar[dict[str, str]] = {
         "A": "XUSB_GAMEPAD_A",
         "B": "XUSB_GAMEPAD_B",
         "X": "XUSB_GAMEPAD_X",

@@ -2,34 +2,35 @@
 from __future__ import annotations
 
 from fixtures.fake_game import FakeGame
+from fixtures.helpers import (
+    FakeGameExecutor,
+    InMemoryObservationStore,
+    InMemoryStepLogSink,
+    NeverInterveneWatchdog,
+    make_null_api,
+)
+
 from vlm_auto_replay.actions.sandbox import ScriptSandbox
 from vlm_auto_replay.actions.skill import Skill
 from vlm_auto_replay.actions.skill_runner import SkillRunner
 from vlm_auto_replay.loop.main_loop import MainLoop
 from vlm_auto_replay.prompts.schemas import ExplainActionOutput, NextActionOutput, ScreenChangeSummary, TodoItem
 
-from test_main_loop import _InMemoryObservationStore, _InMemoryStepLogSink, _NeverInterveneWatchdog
-from test_skill_runner import _make_api
-
 
 def test_generate_next_action_output_may_deviate_from_procedure_guidance(scripted_client):
     """generate_next_actionの出力が手順(guidance_text)から逸脱しても実行が妨げられないこと。"""
     game = FakeGame(steps_to_win=1)
-    sink = _InMemoryStepLogSink()
-
-    class _Executor:
-        def execute(self, action: NextActionOutput) -> None:
-            game.apply(action)
+    sink = InMemoryStepLogSink()
 
     loop = MainLoop(
         capture=game,
-        observation_store=_InMemoryObservationStore(),
+        observation_store=InMemoryObservationStore(),
         step_log_sink=sink,
-        executor=_Executor(),
-        watchdog=_NeverInterveneWatchdog(),
+        executor=FakeGameExecutor(game),
+        watchdog=NeverInterveneWatchdog(),
         todo_done_checker=lambda todo, obs: game.is_done(),
     )
-    runner = SkillRunner(main_loop=loop, sandbox=ScriptSandbox(_make_api()))
+    runner = SkillRunner(main_loop=loop, sandbox=ScriptSandbox(make_null_api()))
 
     # 手順書は "press B" を指示するが、モデルは全く別の "advance" を選ぶ(逸脱)。
     scripted_client.queue("generate_next_action", NextActionOutput(actionType="api", actionId="advance", params={}))

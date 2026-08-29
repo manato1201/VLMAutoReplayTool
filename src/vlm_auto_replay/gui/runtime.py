@@ -10,7 +10,7 @@ from __future__ import annotations
 import threading
 import time
 import uuid
-from typing import Any
+from typing import Any, ClassVar
 
 from ..actions.skill import Skill
 from ..loop.main_loop import MainLoop
@@ -33,7 +33,7 @@ from ..prompts.schemas import (
 class DemoModelClient:
     """9つのtaskすべてに対して決定的な応答を返すデモ用FoundationModelClient実装。"""
 
-    _ACTION_VERBS = ["周囲を観察する", "目標に向けて前進する", "状況を確認する"]
+    _ACTION_VERBS: ClassVar[list[str]] = ["周囲を観察する", "目標に向けて前進する", "状況を確認する"]
 
     def complete(self, *, task: str, payload: dict[str, Any], images: list[bytes] | None, response_model: Any) -> Any:
         handler = getattr(self, f"_{task}", None)
@@ -44,8 +44,12 @@ class DemoModelClient:
     def _decompose_goal_to_todo(self, payload: dict) -> DecomposeGoalOutput:
         goal = payload["goal"]
         todos = [
-            TodoItem(todoId=uuid.uuid4().hex[:8], description=f"{goal}: 準備", doneCriteria="準備が整った状態が観測できる"),
-            TodoItem(todoId=uuid.uuid4().hex[:8], description=f"{goal}: 実行", doneCriteria="目標状態への到達が観測できる"),
+            TodoItem(
+                todoId=uuid.uuid4().hex[:8], description=f"{goal}: 準備", doneCriteria="準備が整った状態が観測できる"
+            ),
+            TodoItem(
+                todoId=uuid.uuid4().hex[:8], description=f"{goal}: 実行", doneCriteria="目標状態への到達が観測できる"
+            ),
             TodoItem(todoId=uuid.uuid4().hex[:8], description=f"{goal}: 確認", doneCriteria="達成が確認できる"),
         ]
         return DecomposeGoalOutput(todos=todos, ragContextUsed=payload.get("rag_context", []))
@@ -64,7 +68,9 @@ class DemoModelClient:
         return ScreenChangeSummary(summary="画面上の進捗インジケータが1段階進行した")
 
     def _extract_experience(self, payload: dict) -> ExperienceOutput:
-        return ExperienceOutput(title="デモ実行の経験", summary="デモ実行が正常に進行した", problem="なし", betterWay="なし")
+        return ExperienceOutput(
+            title="デモ実行の経験", summary="デモ実行が正常に進行した", problem="なし", betterWay="なし"
+        )
 
     def _merge_duplicate_operations(self, payload: dict) -> MergedOperation:
         return MergedOperation(mergedSkillId=uuid.uuid4().hex[:8], paramSchema={})
@@ -119,7 +125,7 @@ class _DemoExecutor:
 
 
 class _LiveStepLogSink:
-    def __init__(self, state: "RuntimeState"):
+    def __init__(self, state: RuntimeState):
         self._state = state
 
     def log_step(self, log: StepLog) -> None:
@@ -133,6 +139,10 @@ class _StoppableWatchdog:
     def __init__(self, base: Watchdog):
         self._base = base
         self.stop_requested = False
+
+    @property
+    def threshold(self) -> int:
+        return self._base.threshold
 
     def should_intervene(self, todo: TodoItem, logs: list[StepLog]) -> bool:
         if self.stop_requested:
@@ -196,7 +206,7 @@ class RuntimeState:
             )
             try:
                 loop.run(todo, max_steps=max_steps)
-            except Exception as exc:  # noqa: BLE001 - GUIにエラーとして表示するため捕捉する
+            except Exception as exc:
                 with self.lock:
                     self.error = str(exc)
             with self.lock:
@@ -215,7 +225,7 @@ class RuntimeState:
                 "status": self.status,
                 "activeTodoId": self.active_todo_id,
                 "error": self.error,
-                "watchdogThreshold": self._watchdog._base._threshold,  # noqa: SLF001 - GUI表示専用
+                "watchdogThreshold": self._watchdog.threshold,
                 "todos": [t.model_dump() for t in self.todos],
                 "logs": [log.model_dump() for log in self.logs],
                 "skills": [s.model_dump() for s in self.skill_library.values()],

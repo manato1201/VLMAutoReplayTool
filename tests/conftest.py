@@ -7,7 +7,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from vlm_auto_replay.prompts.model_client import (  # noqa: E402
+from vlm_auto_replay.prompts.model_client import (
     ScriptedFoundationModelClient,
     configure_model_client,
     reset_model_client,

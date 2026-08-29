@@ -3,12 +3,14 @@ from __future__ import annotations
 
 import pytest
 from fixtures.fake_game import FakeGame
-from vlm_auto_replay.actions.api_primitives import (
-    ApiPrimitives,
-    NullKeyboardMouseBackend,
-    NullPadBackend,
-    ScriptedOcrBackend,
+from fixtures.helpers import (
+    FakeGameExecutor,
+    InMemoryObservationStore,
+    InMemoryStepLogSink,
+    NeverInterveneWatchdog,
+    make_null_api,
 )
+
 from vlm_auto_replay.actions.dispatcher import ActionDispatcher
 from vlm_auto_replay.actions.sandbox import SandboxViolationError, ScriptSandbox
 from vlm_auto_replay.actions.skill import Skill
@@ -16,12 +18,6 @@ from vlm_auto_replay.actions.skill_runner import SkillRunner
 from vlm_auto_replay.loop.main_loop import MainLoop
 from vlm_auto_replay.loop.schemas import StepLog
 from vlm_auto_replay.prompts.schemas import ExplainActionOutput, NextActionOutput, ScreenChangeSummary, TodoItem
-
-from test_main_loop import _InMemoryObservationStore, _InMemoryStepLogSink, _NeverInterveneWatchdog
-
-
-def _make_api() -> ApiPrimitives:
-    return ApiPrimitives(NullPadBackend(), NullKeyboardMouseBackend(), ScriptedOcrBackend())
 
 
 def test_skill_type_procedure_requires_procedural_text():
@@ -52,21 +48,17 @@ def test_skill_auto_requires_source_trace():
 def test_run_procedure_skill_reuses_main_loop_not_separate_path(scripted_client):
     """procedureスキル実行がSkillRunner内で独立ループを持たず、MainLoop.runを再利用していること。"""
     game = FakeGame(steps_to_win=1)
-    sink = _InMemoryStepLogSink()
-
-    class _Executor:
-        def execute(self, action: NextActionOutput) -> None:
-            game.apply(action)
+    sink = InMemoryStepLogSink()
 
     loop = MainLoop(
         capture=game,
-        observation_store=_InMemoryObservationStore(),
+        observation_store=InMemoryObservationStore(),
         step_log_sink=sink,
-        executor=_Executor(),
-        watchdog=_NeverInterveneWatchdog(),
+        executor=FakeGameExecutor(game),
+        watchdog=NeverInterveneWatchdog(),
         todo_done_checker=lambda todo, obs: game.is_done(),
     )
-    runner = SkillRunner(main_loop=loop, sandbox=ScriptSandbox(_make_api()))
+    runner = SkillRunner(main_loop=loop, sandbox=ScriptSandbox(make_null_api()))
 
     scripted_client.queue("generate_next_action", NextActionOutput(actionType="api", actionId="advance", params={}))
     scripted_client.queue("explain_action_choice", ExplainActionOutput(reasoning="follow guidance"))
@@ -89,9 +81,9 @@ def test_run_procedure_skill_reuses_main_loop_not_separate_path(scripted_client)
 
 
 def test_run_script_skill_executes_and_calls_api_primitive():
-    api = _make_api()
+    api = make_null_api()
     sandbox = ScriptSandbox(api)
-    runner = SkillRunner(main_loop=None, sandbox=sandbox)  # type: ignore[arg-type]
+    runner = SkillRunner(main_loop=None, sandbox=sandbox)
     skill = Skill(
         skillId="s1",
         gameTitle="g",
@@ -107,7 +99,7 @@ def test_run_script_skill_executes_and_calls_api_primitive():
 
 
 def test_sandbox_blocks_filesystem_and_network_access():
-    api = _make_api()
+    api = make_null_api()
     sandbox = ScriptSandbox(api)
     with pytest.raises(SandboxViolationError):
         sandbox.execute("import os\nos.system('echo hi')", {})
@@ -116,7 +108,7 @@ def test_sandbox_blocks_filesystem_and_network_access():
 
 
 def test_action_dispatcher_routes_api_and_script_skill():
-    api = _make_api()
+    api = make_null_api()
     sandbox = ScriptSandbox(api)
     skill = Skill(
         skillId="s1",
@@ -127,7 +119,7 @@ def test_action_dispatcher_routes_api_and_script_skill():
         createdBy="auto",
         sourceTrace=["log:1"],
     )
-    runner = SkillRunner(main_loop=None, sandbox=sandbox)  # type: ignore[arg-type]
+    runner = SkillRunner(main_loop=None, sandbox=sandbox)
     dispatcher = ActionDispatcher(api=api, skill_library={"s1": skill}, skill_runner=runner)
 
     dispatcher.execute(NextActionOutput(actionType="api", actionId="mouse_move", params={"dx": 1, "dy": 2}))
@@ -138,12 +130,35 @@ def test_action_dispatcher_routes_api_and_script_skill():
 
 
 def test_action_dispatcher_rejects_single_step_procedure_skill():
-    api = _make_api()
+    api = make_null_api()
     sandbox = ScriptSandbox(api)
     skill = Skill(
         skillId="s1", gameTitle="g", type="procedure", proceduralText="do it", paramSchema={}, createdBy="manual"
     )
-    runner = SkillRunner(main_loop=None, sandbox=sandbox)  # type: ignore[arg-type]
+    runner = SkillRunner(main_loop=None, sandbox=sandbox)
     dispatcher = ActionDispatcher(api=api, skill_library={"s1": skill}, skill_runner=runner)
     with pytest.raises(ValueError):
         dispatcher.execute(NextActionOutput(actionType="skill", actionId="s1", params={}))
+
+
+def test_action_dispatcher_rejects_non_primitive_attribute_names():
+    """actionIdにApiPrimitivesの公開primitive以外の属性名(例: dunderメソッド)を指定しても
+    呼び出せないこと。ホワイトリスト導入前はgetattrで任意属性を呼び出せてしまっていた。
+    """
+    api = make_null_api()
+    sandbox = ScriptSandbox(api)
+    runner = SkillRunner(main_loop=None, sandbox=sandbox)
+    dispatcher = ActionDispatcher(api=api, skill_library={}, skill_runner=runner)
+    with pytest.raises(KeyError):
+        dispatcher.execute(NextActionOutput(actionType="api", actionId="__init__", params={}))
+
+
+def test_run_procedure_skill_without_main_loop_raises_clear_error():
+    sandbox = ScriptSandbox(make_null_api())
+    runner = SkillRunner(main_loop=None, sandbox=sandbox)
+    skill = Skill(
+        skillId="s1", gameTitle="g", type="procedure", proceduralText="do it", paramSchema={}, createdBy="manual"
+    )
+    todo = TodoItem(todoId="t1", description="win", doneCriteria="progress>=1")
+    with pytest.raises(RuntimeError):
+        runner.run_procedure_skill(skill, todo, max_steps=1)

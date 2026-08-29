@@ -18,6 +18,11 @@ def _make_log(step_index: int, todo_id: str) -> StepLog:
     )
 
 
+def test_threshold_is_exposed_as_public_property():
+    watchdog = Watchdog(stall_step_threshold=7)
+    assert watchdog.threshold == 7
+
+
 def test_temporary_failure_does_not_trigger_rebuild(scripted_client):
     """一時的失敗フィクスチャ(数ステップで自然回復)では再構築が発火しないこと。"""
     watchdog = Watchdog(stall_step_threshold=15)

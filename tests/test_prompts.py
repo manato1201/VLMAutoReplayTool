@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import pytest
+
 from vlm_auto_replay.prompts import functions as fn
 from vlm_auto_replay.prompts.model_client import get_model_client, reset_model_client
 from vlm_auto_replay.prompts.schemas import (

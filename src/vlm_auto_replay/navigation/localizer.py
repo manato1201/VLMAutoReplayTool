@@ -11,7 +11,8 @@ from __future__ import annotations
 
 import hashlib
 import math
-from typing import Callable, Protocol
+from collections.abc import Callable
+from typing import Protocol
 
 from ..actions.api_primitives import ApiPrimitives
 from .screen_state import ScreenState
@@ -36,7 +37,7 @@ class SimpleHashDescriptorExtractor:
 
 
 def _cosine_similarity(a: tuple[float, ...], b: tuple[float, ...]) -> float:
-    dot = sum(x * y for x, y in zip(a, b))
+    dot = sum(x * y for x, y in zip(a, b, strict=True))
     norm_a = math.sqrt(sum(x * x for x in a))
     norm_b = math.sqrt(sum(y * y for y in b))
     if norm_a == 0 or norm_b == 0:
@@ -58,6 +59,17 @@ class Localizer:
         self._api = api
         self._confirm_region = confirm_region
         self._coarse_top_k = coarse_top_k
+        # referenceImageRef -> 特徴量のキャッシュ。既知状態の集合は静的な参照画像なので、
+        # localize()を繰り返し呼んでも同じ状態の特徴量を毎回再計算しない
+        # (本格的なCNN埋め込み等、抽出コストが高い実装に差し替えたときほど効いてくる)。
+        self._descriptor_cache: dict[str, tuple[float, ...]] = {}
+
+    def _descriptor_for(self, state: ScreenState) -> tuple[float, ...]:
+        cached = self._descriptor_cache.get(state.referenceImageRef)
+        if cached is None:
+            cached = self._extractor.extract(self._load_image(state.referenceImageRef))
+            self._descriptor_cache[state.referenceImageRef] = cached
+        return cached
 
     def localize(self, observation: bytes, known_states: list[ScreenState]) -> ScreenState | None:
         coarse_candidates = self._global_descriptor_search(observation, known_states)  # 1. coarse search
@@ -82,7 +94,7 @@ class Localizer:
         obs_vec = self._extractor.extract(observation)
         scored = sorted(
             known_states,
-            key=lambda s: -_cosine_similarity(obs_vec, self._extractor.extract(self._load_image(s.referenceImageRef))),
+            key=lambda s: -_cosine_similarity(obs_vec, self._descriptor_for(s)),
         )
         return scored[: self._coarse_top_k]
 
@@ -93,10 +105,7 @@ class Localizer:
         同じdescriptor類似度で再計算する軽量実装(TODO: 本格的なre-rankerに置換)。
         """
         obs_vec = self._extractor.extract(observation)
-        scored = [
-            (state, _cosine_similarity(obs_vec, self._extractor.extract(self._load_image(state.referenceImageRef))))
-            for state in candidates
-        ]
+        scored = [(state, _cosine_similarity(obs_vec, self._descriptor_for(state))) for state in candidates]
         return sorted(scored, key=lambda pair: -pair[1])
 
     def _final_confirm(self, candidate: ScreenState) -> bool:
