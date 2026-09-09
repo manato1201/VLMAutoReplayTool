@@ -17,9 +17,10 @@ dependencies = [
 hid = ["vgamepad>=0.0.8"]
 # 画面キャプチャ・OCRの実バックエンド(Phase3/7)。
 vision = ["mss>=9.0", "pillow>=10.0"]
-# 操作用GUI(FastAPIダッシュボード)。
-gui = ["fastapi>=0.110", "uvicorn>=0.29"]
-dev = ["pytest>=8.0", "fastapi>=0.110", "uvicorn>=0.29", "httpx>=0.27"]
+# 操作用GUI(FastAPIダッシュボード)。websocketsはPhase8モニタリングHUDの配信に使う
+# (uvicornの実運用でのWebSocketサーバ実装として必要。TestClientでのテストには不要)。
+gui = ["fastapi>=0.110", "uvicorn>=0.29", "websockets>=12.0"]
+dev = ["pytest>=8.0", "fastapi>=0.110", "uvicorn>=0.29", "httpx>=0.27", "websockets>=12.0"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

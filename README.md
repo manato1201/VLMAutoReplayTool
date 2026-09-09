@@ -31,6 +31,7 @@ flowchart LR
 | Phase5 | Watchdog+TODO再構築 | `src/vlm_auto_replay/loop/watchdog.py` フル実装 |
 | Phase6 | スキル自動抽出 | `src/vlm_auto_replay/skills/` 軽量実装(TODOコメントあり) |
 | Phase7 | ナビゲーション推論 | `src/vlm_auto_replay/navigation/` 軽量実装(TODOコメントあり) |
+| Phase8 | モニタリングHUD(UI/アニメーション強化) | `src/vlm_auto_replay/gui/hud_broadcast.py` + `gui/static/hud.{html,js}` フル実装 |
 
 ## 動作確認手順(クイックスタート)
 
@@ -49,7 +50,7 @@ python -m venv .venv
 .venv/Scripts/pytest -q
 ```
 
-`60 passed` と表示されれば、Phase1〜7のコアロジック(型付きプロンプト関数・メインループ・Skill/API実行・RAG境界・Watchdog・スキル抽出・ナビゲーション)とGUI(FastAPIエンドポイント+SQLite永続化)がすべて正常。
+`67 passed` と表示されれば、Phase1〜8のコアロジック(型付きプロンプト関数・メインループ・Skill/API実行・RAG境界・Watchdog・スキル抽出・ナビゲーション)とGUI(FastAPIエンドポイント+SQLite永続化+HUD WebSocket配信)がすべて正常。
 
 **3. GUIサーバを起動する**
 
@@ -70,6 +71,7 @@ python -m venv .venv
 7. サーバーをいったん `Ctrl+C` で止めて再度 `python -m vlm_auto_replay.gui` すると、追加したスキルと実行履歴が消えずに残っていることを確認する(`~/.vlm_auto_replay/gui.sqlite3` にSQLiteで永続化されている)
 8. 別のTODOで「🐢 Watchdog介入をデモする」にチェックを入れてから **実行開始** をクリックすると、意図的に完了しないゲームに対してWatchdogが8ステップで自動介入し、STATUSが `INTERVENED` になる。Watchdogパネルに介入理由のバナーが表示され、「ゴール分解」パネルのTODOリストが自動で再構築された新しいTODOに置き換わることを確認する
 9. 「設定: HIDバックエンド」パネルで `SendInput` を選ぶと、この環境で実際にPhase3のHID実装が構築できることを確認できる(Windows上ではctypesのみで構築でき、クリックしても実際にキー入力やマウス移動は発生しない)。`ViGEm` を選ぶと、`vgamepad`パッケージ未インストールの場合は「vgamepad が未インストールです」という明確なエラーが表示され、選択は直前の状態のまま変わらないことを確認する
+10. ヘッダーの **HUDを開く →** から `http://127.0.0.1:8765/hud.html` を開く(操作パネルとは別ページ)。WSステータスが「接続済み」になったら、操作パネル側でTODOを実行開始する → HUD側にリアルタイムでドットチャート(StepLogビュー)・フォーカスリング(TODOビュー)・ラジアルプログレスが反映されることを確認する。「🐢 Watchdog介入をデモする」付きで実行すると、介入したステップのドットが赤くなり、右下にスタックトーストが出ることも確認する
 
 実VLM・実HID(ViGEm/SendInput)を使わない**デモモード**で動くため、APIキーやドライバのセットアップなしにこの一連の流れを確認できる。実モデル/実HIDへの差し替え方は次項参照。
 
@@ -96,7 +98,7 @@ src/vlm_auto_replay/
   knowledge/   Phase4 RAGクライアント+Experience
   skills/      Phase6 スキル自動抽出+受け入れゲート
   navigation/  Phase7 視覚的自己位置推定パイプライン
-  gui/         操作用Webダッシュボード(FastAPI+静的フロントエンド)
+  gui/         操作用Webダッシュボード(FastAPI+静的フロントエンド)、Phase8 HUD WebSocket配信
 tests/
   fixtures/fake_game.py  Final Phase向け決定的フェイクゲーム
 ```

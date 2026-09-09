@@ -11,6 +11,15 @@
   --hairline-violet: #362d59;
   --on-dark-muted: rgba(255, 255, 255, 0.72);
   --on-dark-faint: rgba(255, 255, 255, 0.18);
+
+  /* Phase8 モニタリングHUD: 設計書のコンポーネント別トークン名を既存パレットへ写像する。 */
+  --rail-bg: var(--surface-night);
+  --rail-active: #79628c;
+  --focus-ring: var(--accent-lime);
+  --dot-ok: var(--accent-lime);
+  --dot-stall: var(--accent-pink);
+  --ring-track: var(--hairline-violet);
+  --ring-fill: var(--accent-lime);
 }
 
 * {
@@ -444,4 +453,176 @@ body {
 .eyebrow.error {
   color: var(--accent-pink);
   border-color: var(--accent-pink);
+}
+
+/* ============================================================
+   Phase8: モニタリングHUD専用コンポーネント(hud.html/hud.js)
+   ============================================================ */
+
+.hud-body {
+  max-width: 1152px;
+  margin: 0 auto;
+  padding: 24px;
+}
+
+.hud-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 24px;
+  flex-wrap: wrap;
+}
+
+.hud-ws-status {
+  font-family: "Monaco", "Menlo", "Ubuntu Mono", monospace;
+  font-size: 12px;
+  color: var(--on-dark-muted);
+}
+
+.hud-ws-status.connected {
+  color: var(--accent-lime);
+}
+
+/* 1. セグメントレール */
+.segment-rail {
+  display: flex;
+  gap: 2px;
+  background: var(--rail-bg);
+  border: 1px solid var(--hairline-violet);
+  border-radius: 8px;
+  padding: 2px;
+  width: fit-content;
+}
+
+.segment-rail button {
+  background: transparent;
+  color: var(--on-dark-muted);
+  border: none;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 8px 16px;
+  cursor: pointer;
+}
+
+.segment-rail button[aria-selected="true"] {
+  background: var(--rail-active);
+  color: var(--on-primary);
+  border-radius: 6px;
+  transition: background 160ms ease-out;
+}
+
+.hud-view {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* 2. フォーカスリング */
+.todo-card {
+  position: relative;
+}
+
+.todo-card.focused::after {
+  content: "";
+  position: absolute;
+  inset: -4px;
+  border-radius: 16px;
+  border: 2px solid var(--focus-ring);
+  animation: hud-pulse 1.6s ease-in-out infinite;
+  pointer-events: none;
+}
+
+@keyframes hud-pulse {
+  50% {
+    opacity: 0.4;
+  }
+}
+
+/* 3. ドットチャート */
+.dot-chart {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 16px;
+  background: var(--surface-night);
+  border: 1px solid var(--hairline-violet);
+  border-radius: 12px;
+  min-height: 24px;
+}
+
+.dot-chart .dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--dot-ok);
+  flex-shrink: 0;
+  cursor: default;
+}
+
+.dot-chart .dot.stall {
+  background: var(--dot-stall);
+}
+
+/* 4. スタックトースト */
+.toast-stack {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 8px;
+  max-width: 320px;
+  z-index: 50;
+}
+
+.toast {
+  background: var(--ink-deep);
+  border: 1px solid var(--hairline-violet);
+  border-left: 3px solid var(--accent-lime);
+  border-radius: 8px;
+  padding: 12px 14px;
+  font-size: 13px;
+  color: var(--on-primary);
+  box-shadow: rgba(0, 0, 0, 0.3) 0 10px 24px;
+  animation: hud-slide-in 220ms ease-out;
+}
+
+.toast.stall {
+  border-left-color: var(--accent-pink);
+}
+
+.toast .toast-title {
+  font-weight: 700;
+  margin-bottom: 2px;
+}
+
+@keyframes hud-slide-in {
+  from {
+    transform: translateX(120%);
+    opacity: 0;
+  }
+}
+
+/* 5. ラジアルプログレス */
+.radial-progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.radial-progress svg {
+  width: 40px;
+  height: 40px;
+  transform: rotate(-90deg);
+}
+
+.radial-progress circle {
+  transition: stroke-dashoffset 240ms ease-out;
+}
+
+.radial-progress-label {
+  font-family: "Monaco", "Menlo", "Ubuntu Mono", monospace;
+  font-size: 13px;
+  color: var(--on-dark-muted);
 }

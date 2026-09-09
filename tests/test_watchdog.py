@@ -45,6 +45,34 @@ def test_threshold_forces_intervention_regardless_of_diagnosis(scripted_client):
     assert watchdog.should_intervene(todo, logs) is True
 
 
+def test_last_diagnosis_is_none_before_any_check():
+    watchdog = Watchdog(stall_step_threshold=15)
+    assert watchdog.last_diagnosis is None
+
+
+def test_last_diagnosis_not_updated_when_threshold_short_circuits(scripted_client):
+    """閾値到達(強制発動)経路ではdiagnose_stallを呼ばないため、last_diagnosisは
+    直前の呼び出し結果のまま(=更新されない)ことを確認する。HUD配信側がこの
+    「古い診断結果」を今回の介入理由として誤って使わないための前提となる仕様。
+    """
+    watchdog = Watchdog(stall_step_threshold=2)
+    todo = TodoItem(todoId="t1", description="d", doneCriteria="c")
+
+    # 1回目: 閾値未満でdiagnose_stallが呼ばれ、last_diagnosisが設定される。
+    scripted_client.queue(
+        "diagnose_stall", StallDiagnosis(rootCause="minor", nextApproach="retry", shouldRebuildTodo=False)
+    )
+    assert watchdog.should_intervene(todo, [_make_log(0, "t1")]) is False
+    assert watchdog.last_diagnosis is not None
+    assert watchdog.last_diagnosis.rootCause == "minor"
+
+    # 2回目: 閾値到達で強制発動。diagnose_stallは呼ばれないため、last_diagnosisは
+    # 1回目のまま(この呼び出しの「理由」ではないので、呼び出し側は使ってはいけない)。
+    logs = [_make_log(0, "t1"), _make_log(1, "t1")]
+    assert watchdog.should_intervene(todo, logs) is True
+    assert watchdog.last_diagnosis.rootCause == "minor"  # 更新されていない(=古いまま)
+
+
 def test_diagnose_stall_true_triggers_below_threshold(scripted_client):
     watchdog = Watchdog(stall_step_threshold=15)
     todo = TodoItem(todoId="t1", description="d", doneCriteria="c")

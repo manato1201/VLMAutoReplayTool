@@ -29,7 +29,7 @@ from ..actions.skill import Skill
 from ..loop.main_loop import MainLoop
 from ..loop.schemas import StepLog
 from ..loop.watchdog import Watchdog
-from ..prompts.functions import decompose_goal_to_todo
+from ..prompts.functions import decompose_goal_to_todo, extract_experience
 from ..prompts.schemas import (
     DecomposeGoalOutput,
     ExperienceOutput,
@@ -41,6 +41,7 @@ from ..prompts.schemas import (
     StallDiagnosis,
     TodoItem,
 )
+from .hud_broadcast import HudBroadcaster
 from .persistence import SqlitePersistence
 
 
@@ -235,6 +236,7 @@ class _LiveStepLogSink:
         with self._state.lock:
             self._state.logs.append(log)
         self._state.db.append_log(self._run_id, log)
+        self._state.hud.publish({"type": "step_log", "log": log.model_dump()})
 
 
 class _StoppableWatchdog:
@@ -253,6 +255,10 @@ class _StoppableWatchdog:
     @property
     def threshold(self) -> int:
         return self._base.threshold
+
+    @property
+    def last_diagnosis(self) -> StallDiagnosis | None:
+        return self._base.last_diagnosis
 
     def reset(self) -> None:
         self.stop_requested = False
@@ -287,12 +293,14 @@ def _default_skill_library() -> dict[str, Skill]:
 
 
 class RuntimeState:
-    def __init__(self, db_path: str | Path | None = None) -> None:
+    def __init__(self, db_path: str | Path | None = None, hud: HudBroadcaster | None = None) -> None:
         self.lock = threading.Lock()
         self.db = SqlitePersistence(db_path)
+        self.hud = hud or HudBroadcaster()
         self.todos: list[TodoItem] = []
         self.logs: list[StepLog] = []
         self.observations: dict[str, bytes] = {}
+        self.completed_todo_ids: set[str] = set()
         self.skill_library: dict[str, Skill] = self._load_or_seed_skill_library()
         self._watchdog = _StoppableWatchdog(Watchdog(stall_step_threshold=8))
         self.status = "idle"  # idle | running | done | stopped | error | intervened
@@ -315,16 +323,26 @@ class RuntimeState:
             self.db.save_skill(skill)
         return seed
 
+    def _publish_todos(self) -> None:
+        with self.lock:
+            todos = list(self.todos)
+            completed = list(self.completed_todo_ids)
+        self.hud.publish(
+            {"type": "todos", "todos": [t.model_dump() for t in todos], "completedTodoIds": completed}
+        )
+
     def decompose(self, goal: str) -> list[TodoItem]:
         result = decompose_goal_to_todo(goal, rag_context=[])
         with self.lock:
             self.todos = result.todos
             self.logs = []
             self.observations = {}
+            self.completed_todo_ids = set()
             self.status = "idle"
             self.active_todo_id = None
             self.error = None
             self._current_game = None
+        self._publish_todos()
         return result.todos
 
     def start_run(self, todo_id: str, max_steps: int = 12, stall_demo: bool = False) -> None:
@@ -380,6 +398,11 @@ class RuntimeState:
                 final_status = self.status
             if final_status == "intervened":
                 self._apply_watchdog_rebuild(todo, logs)
+            elif final_status == "done":
+                with self.lock:
+                    self.completed_todo_ids.add(todo.todoId)
+                self._publish_todos()
+                self._publish_experience(logs)
             self.db.finish_run(run_id, final_status, finished_at=_now_iso())
 
         self._thread = threading.Thread(target=_run, daemon=True)
@@ -401,6 +424,36 @@ class RuntimeState:
                 "newTodoIds": [t.todoId for t in new_todos],
                 "occurredAt": _now_iso(),
             }
+            intervention = dict(self.last_intervention)
+        # last_diagnosisは「直近のdiagnose_stall呼び出し結果」であり、閾値到達(強制発動)経路では
+        # 更新されない(=前回呼び出し時点の使い回し)。今回の介入が実際にdiagnose_stallの
+        # shouldRebuildTodo==Trueによるものだった場合に限り、その内容を信頼できる理由として扱う。
+        # そうでなければ古い(無関係な)診断結果をHUDに誤表示してしまう。
+        diagnosis = self._watchdog.last_diagnosis
+        diagnosis_is_trigger = diagnosis is not None and diagnosis.shouldRebuildTodo
+        self.hud.publish(
+            {
+                "type": "watchdog_intervened",
+                "stepIndex": logs[-1].stepIndex if logs else None,
+                "message": (
+                    f"「{intervention['todoDescription']}」が{intervention['stepCount']}ステップ継続したため、"
+                    f"{len(intervention['newTodoIds'])}件の新しいTODOへ再構築しました。"
+                ),
+                "diagnosis": diagnosis.model_dump() if diagnosis_is_trigger else None,
+                "intervention": intervention,
+            }
+        )
+        self._publish_todos()
+
+    def _publish_experience(self, logs: list[StepLog]) -> None:
+        """完走したRunのStepLogから再利用可能な知見を抽出し(Phase1 extract_experience)、
+        HUDのスタックトースト向けに配信する。ループ本体(MainLoop)には一切影響しない
+        — 完走後の後処理としてGUI/HUD層でのみ呼び出す。
+        """
+        if not logs:
+            return
+        experience = extract_experience([log.model_dump() for log in logs])
+        self.hud.publish({"type": "experience", "experience": experience.model_dump()})
 
     def stop_run(self) -> None:
         self._watchdog.stop_requested = True
@@ -446,6 +499,7 @@ class RuntimeState:
         with self.lock:
             self.skill_library[skill.skillId] = skill
         self.db.save_skill(skill)
+        self._publish_skills()
         return skill
 
     def remove_skill(self, skill_id: str) -> None:
@@ -454,6 +508,12 @@ class RuntimeState:
                 raise KeyError(f"未知のskillIdです: {skill_id}")
             del self.skill_library[skill_id]
         self.db.delete_skill(skill_id)
+        self._publish_skills()
+
+    def _publish_skills(self) -> None:
+        with self.lock:
+            skills = list(self.skill_library.values())
+        self.hud.publish({"type": "skills", "skills": [s.model_dump() for s in skills]})
 
     def list_history(self, limit: int = 20) -> list[dict]:
         return self.db.list_runs(limit)
@@ -475,6 +535,7 @@ class RuntimeState:
                 "watchdogThreshold": self._watchdog.threshold,
                 "progress": game.progress if game else 0,
                 "stepsToWin": game.steps_to_win if game else 0,
+                "completedTodoIds": list(self.completed_todo_ids),
                 "todos": [t.model_dump() for t in self.todos],
                 "logs": [log.model_dump() for log in self.logs],
                 "skills": [s.model_dump() for s in self.skill_library.values()],

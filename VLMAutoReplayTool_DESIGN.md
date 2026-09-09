@@ -500,3 +500,67 @@ class Localizer:
 ## 優先度注記
 
 別文書「DynamicGIMiddleware設計書」と並び、本バッチ中最もR&D色が強い文書である。アーキテクチャ(ループ形状・スキーマ・Skill/APIの分類)は現時点で確定的にコミットできるため具体的に設計したが、基盤モデル・専用モデルの選定と精度目標(ナビゲーション推定精度、スキル抽出の再現率等)は明示的にヘッジし、実装反復の中で確定させる方針とする。特にPhase6(スキル自動抽出)とPhase7(視覚的自己位置推定)は、他フェーズと異なり一発の実装では収束しにくく、複数回の反復(パラメータ調整・受け入れゲートの閾値調整・re-ranking手法の見直し)が前提になりやすい点をあらかじめ明記しておく。
+
+---
+
+## Phase 8: モニタリングHUD(UI/アニメーション強化)(2026-09-09追記)
+
+**背景**: X上の@ozwxy氏の実演(GPT-6 Astraによる高品質UIコンポーネント生成デモ)を受け、ユーザーがUI/アニメーション面の強化を明示的に要望。本ツールには従来UIフェーズが存在しなかったが、Phase2の`StepLog`・Phase1のTODOスキーマ・Phase5の`StallDiagnosis`・Phase1の`ExperienceOutput`をそのまま可視化するモニタリングHUDとして、以下5種のコンポーネントを新設する。新規データモデルは作らず、既存スキーマをHUD側が読むだけの片方向データフローとする(HUDからループへの書き込みは行わない)。
+
+**実装内容:**
+
+配信経路は`MainLoop.log_step`(Phase2)にHUD向けWebSocketブロードキャストをフックし、`hud/server.py`(FastAPI + `websockets`)が`StepLog`/`TodoItem`/`StallDiagnosis`/`ExperienceOutput`をJSONのまま配信する。フロントエンドはフレームワーク非依存のvanilla JS+CSS/SVGとし、既存のPython実装に新規ビルドチェーンを持ち込まない。
+
+1. **セグメントレール(Segment Rail)**: HUD上部の「TODOビュー/StepLogビュー/Skillライブラリビュー」の3タブ切り替え。データ取得(WebSocket購読)はビュー間で共有し、切り替えは描画対象の差し替えのみとする。
+
+```css
+.segment-rail { display: flex; gap: 2px; background: var(--rail-bg); border-radius: 8px; padding: 2px; }
+.segment-rail button[aria-selected="true"] {
+  background: var(--rail-active); border-radius: 6px; transition: background 160ms ease-out;
+}
+```
+
+2. **フォーカスリング(Focus Ring)**: TODOビューで、直近`StepLog.todoId`と一致する`TodoItem`をリング状のハイライトで囲み、現在実行中のTODOを示す。HUD独自の実行状態は持たず、Phase2のログを唯一の真実とする。
+
+```css
+.todo-item.focused::after {
+  content: ""; position: absolute; inset: -4px; border-radius: 10px;
+  border: 2px solid var(--focus-ring); animation: pulse 1.6s ease-in-out infinite;
+}
+@keyframes pulse { 50% { opacity: .4; } }
+```
+
+3. **ドットチャート(Dot Chart)**: StepLogビューで`StepLog`を`stepIndex`順に1ドットずつ横並び配置し、`Watchdog.should_intervene`(Phase5)がTrueを返した`stepIndex`を赤、それ以外を緑で色分けする。`diagnose_stall`のトリガー箇所が時系列上で一目で分かる。
+
+```js
+// hud/dotchart.js — stallStepsはWatchdogが返したstepIndex集合(HUD配信時の付加情報。StepLog自体は変更しない)
+function dotColor(step, stallSteps) {
+  return stallSteps.has(step.stepIndex) ? 'var(--dot-stall)' : 'var(--dot-ok)';
+}
+```
+
+4. **スタックトースト(Stack Toast)**: `extract_experience`が新規`ExperienceOutput`(Title/Summary/Problem/BetterWay)を抽出した場合、または`diagnose_stall`が発火した場合に、通知を積み重ねて表示する。本文は`ExperienceOutput.title`または`StallDiagnosis.rootCause`をそのまま表示し、HUD側で文言の再生成は行わない。
+
+```css
+.toast-stack { position: fixed; right: 16px; bottom: 16px; display: flex; flex-direction: column-reverse; gap: 8px; }
+.toast { animation: slide-in 220ms ease-out; }
+@keyframes slide-in { from { transform: translateX(120%); opacity: 0; } }
+```
+
+5. **ラジアルプログレス(Radial Progress)**: 現在の`TodoItem`リストにおける完了数/全体数を円環ゲージで表示する。`doneCriteria`の完了判定はHUD側で再評価せず、Phase2のループが記録した完了イベントをそのまま受け取る。
+
+```html
+<svg viewBox="0 0 40 40">
+  <circle cx="20" cy="20" r="16" stroke="var(--ring-track)" fill="none" stroke-width="4" />
+  <circle cx="20" cy="20" r="16" stroke="var(--ring-fill)" fill="none" stroke-width="4"
+    stroke-dasharray="100.5" stroke-dashoffset="{100.5 * (1 - done/total)}" />
+</svg>
+```
+
+**検証チェックリスト:**
+- [ ] HUDが`StepLog`/`TodoItem`/`StallDiagnosis`/`ExperienceOutput`を読み取り専用で消費し、いずれのスキーマにもHUD都合のフィールドを追加していない
+- [ ] セグメントレールの3タブ切り替えが単一のWebSocket購読を共有し、データ取得ロジックを重複させていない
+- [ ] フォーカスリングの点灯条件が「最新`StepLog.todoId`との一致」のみであり、HUD独自の実行状態を保持していない
+- [ ] ドットチャートの赤ドット発生箇所と`Watchdog.should_intervene`がTrueを返したステップのタイムスタンプが1対1で一致する
+- [ ] スタックトーストの本文が`extract_experience`/`diagnose_stall`の出力をそのまま表示し、HUD側で文言を再生成していない
+- [ ] ラジアルプログレスの分母(`total`)がTODO再構築(Phase5)発生後に古い件数で固定されず、新TODOリストの件数に追従する

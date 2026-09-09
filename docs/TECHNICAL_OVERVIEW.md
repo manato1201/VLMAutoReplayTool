@@ -335,21 +335,72 @@ sequenceDiagram
 
 ---
 
-## 10. テスト戦略
+## 10. Phase8: モニタリングHUD(UI/アニメーション強化)
 
-`tests/` 配下、60件。決定的フェイクゲーム(`tests/fixtures/fake_game.py`)を用い、実VLM/実HIDなしでコアフローをエンドツーエンドに近い形で検証する。共有テストダブル(`InMemoryObservationStore`等)は`tests/fixtures/helpers.py`に集約し、テストファイル間の直接importに依存しない。
+設計書のPhase8追記(2026-09-09)に基づく。既存スキーマ(`StepLog` / `TodoItem` / `StallDiagnosis` / `ExperienceOutput`)をHUDが読み取り専用で消費する片方向データフロー — HUDから`MainLoop`やGUIの状態への書き込みは一切存在しない。新規データモデルは作らず、既存スキーマの`model_dump()`をそのままJSONとして配信する。
+
+```mermaid
+sequenceDiagram
+    participant Browser as ブラウザ(hud.html)
+    participant WS as GET/WS /ws/hud
+    participant Broadcaster as HudBroadcaster
+    participant Thread as MainLoopバックグラウンドスレッド
+
+    Browser->>WS: WebSocket接続
+    WS->>Broadcaster: register(websocket)
+
+    Thread->>Broadcaster: publish({"type": "step_log", "log": ...})
+    Note over Broadcaster: asyncio.Queue + call_soon_threadsafeで<br/>ワーカースレッドからイベントループへブリッジ
+    Broadcaster-->>Browser: send_json(event)
+
+    Thread->>Broadcaster: publish({"type": "watchdog_intervened", ...})
+    Broadcaster-->>Browser: send_json(event)
+
+    Thread->>Broadcaster: publish({"type": "experience", ...})
+    Broadcaster-->>Browser: send_json(event)
+```
+
+**配信経路**(`gui/hud_broadcast.py::HudBroadcaster`): `RuntimeState`のバックグラウンドスレッド(`MainLoop`実行スレッド)からは`publish(event)`のみを呼ぶ。内部では`asyncio.Queue`を`loop.call_soon_threadsafe()`経由で操作し、FastAPIのイベントループ上で動く`_run_pump()`タスクが`WebSocket.send_json()`で配信する。
+
+> **設計上の教訓**: 当初は標準の`queue.Queue`を`loop.run_in_executor(None, q.get)`でポーリングする実装だったが、`asyncio.Queue`と異なりこの待機はタスクキャンセルで即座に中断できず、TestClientでの起動・終了を繰り返すたびにブロック中のexecutorワーカースレッドが残留し、`concurrent.futures.thread._python_exit`が全workerの終了を待つ関係でpytestプロセスごとハングする不具合を引き起こした。`asyncio.Queue`+`call_soon_threadsafe`への切り替えで解消している。
+
+**配信イベント一覧**:
+
+| `type` | 発生元 | 内容 |
+|---|---|---|
+| `todos` | `decompose()` / `_apply_watchdog_rebuild()` | `todos`(TodoItem配列)+`completedTodoIds` |
+| `step_log` | `_LiveStepLogSink.log_step()` | `log`(StepLogそのまま) |
+| `watchdog_intervened` | `_apply_watchdog_rebuild()` | `stepIndex` / `message` / `diagnosis`(StallDiagnosisまたはnull) / `intervention` |
+| `experience` | 完走(`status=="done"`)後の後処理 | `experience`(ExperienceOutputそのまま、`extract_experience`をその場で呼び出す) |
+| `skills` | `add_skill()` / `remove_skill()` | `skills`(Skill配列) |
+
+**5つのHUDコンポーネント**(`gui/static/hud.html` + `hud.js`):
+
+1. **セグメントレール** — TODO/StepLog/Skillライブラリの3ビューを切り替える。単一のWebSocket購読を共有し、切り替えは`hidden`属性のトグルのみ(ビューごとの再フェッチをしない)。
+2. **フォーカスリング** — 直近の`step_log`イベントの`todoId`と一致するTODOカードにのみ`.focused`クラスを付与する。HUD独自の実行状態は保持しない。
+3. **ドットチャート** — `stepIndex`順にドットを並べ、`watchdog_intervened`イベントの`stepIndex`と一致するドットのみ赤くする。
+4. **スタックトースト** — `experience`イベントは`experience.summary`を、`watchdog_intervened`イベントは`diagnosis`が非nullの場合のみ`diagnosis.rootCause`をそのまま表示する。
+5. **ラジアルプログレス** — `completedTodoIds.length / todos.length`を円環ゲージで描画する。`_apply_watchdog_rebuild()`が`todos`イベントを再配信するため、TODO再構築後も分母(`total`)が新しいTODO件数に追従する。
+
+**「もっともらしいが誤った」表示の回避(重要な修正)**: `Watchdog.last_diagnosis`(Phase5に追加した読み取り専用プロパティ)は、`should_intervene()`が閾値到達(強制発動)経路で早期リターンした場合には更新されない — つまり直前の呼び出し結果が残ったままになる。ここで`last_diagnosis`を無条件に「介入理由」としてHUDへ配信すると、無関係な過去の診断結果("停滞なし"等)を今回の介入理由であるかのように誤表示してしまう不具合が実際に発生した(ヘッドレスブラウザでの実機検証で発見)。`_apply_watchdog_rebuild()`は`diagnosis.shouldRebuildTodo is True`の場合に限り`diagnosis`を配信し、それ以外(閾値到達による強制発動)では`diagnosis: null`とし、`message`フィールド(サーバ側で組み立てた要約文)にフォールバックすることで解消した。`tests/test_gui_server.py`と`tests/test_watchdog.py`の双方に回帰テストがある。
+
+---
+
+## 11. テスト戦略
+
+`tests/` 配下、67件。決定的フェイクゲーム(`tests/fixtures/fake_game.py`)を用い、実VLM/実HIDなしでコアフローをエンドツーエンドに近い形で検証する。共有テストダブル(`InMemoryObservationStore`等)は`tests/fixtures/helpers.py`に集約し、テストファイル間の直接importに依存しない。
 
 | ファイル | 検証内容 |
 |---|---|
 | `test_prompts.py` | Phase1: 9関数の型付き入出力、モデル差し替え可能性 |
 | `test_main_loop.py` | Phase2: 決定的完走、状態変化駆動の進行、`stepIndex`の単調性、reasoning必須 |
-| `test_watchdog.py` | Phase5: 二重条件、再構築スコープの厳密化、`threshold`公開プロパティ |
+| `test_watchdog.py` | Phase5: 二重条件、再構築スコープの厳密化、`threshold`/`last_diagnosis`公開プロパティ |
 | `test_skill_runner.py` | Phase3: procedure/script二層、サンドボックス、ActionDispatcherのホワイトリスト、main_loop未設定時のエラー |
 | `test_rag_boundary.py` | Phase4: RAG境界のAST静的解析+コールカウント実証 |
 | `test_skill_extraction.py` | Phase6: 3ステップ反復→1マージ済みSkill、受け入れゲート |
 | `test_navigation.py` | Phase7: 4段パイプラインの分離、偽陽性防御、状態遷移グラフ整合性、descriptorキャッシュ |
 | `test_final_integration.py` | Final Phase: procedureスキルの非強制性(逸脱の許容) |
-| `test_gui_server.py` | GUI: バリデーション(400/422/404)、デモ完走、進捗・観測画像・スキルCRUD・Watchdog介入と再構築・履歴・HIDバックエンド設定 |
+| `test_gui_server.py` | GUI: バリデーション(400/422/404)、デモ完走、進捗・観測画像・スキルCRUD・Watchdog介入と再構築・履歴・HIDバックエンド設定・HUD WebSocket配信(5イベント種別+誤表示防止の回帰テスト) |
 
 ```bash
 .venv/Scripts/pytest -q
@@ -357,7 +408,7 @@ sequenceDiagram
 
 ---
 
-## 11. 差し替えポイント一覧
+## 12. 差し替えポイント一覧
 
 | 差し替え対象 | Protocol/場所 | 既定実装 | 本番実装の例 |
 |---|---|---|---|

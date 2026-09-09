@@ -8,7 +8,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Response
+from fastapi import FastAPI, HTTPException, Response, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -33,7 +33,11 @@ async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
     # 副作用を発生させると、テストなど「このモジュールをimportするだけ」のコードから
     # 意図せずグローバルなモデルクライアント設定が書き換わってしまうため。
     _ensure_model_client_configured()
+    # Phase8: HUD配信ポンプもアプリのasyncioイベントループ上で起動する(importやRuntimeState
+    # 構築の時点ではまだイベントループが無いため、ここで初めて開始できる)。
+    state.hud.start()
     yield
+    state.hud.stop()
 
 
 app = FastAPI(title="VLMAutoReplayTool Control Panel", lifespan=_lifespan)
@@ -147,6 +151,18 @@ def api_set_hid_backend(req: HidBackendRequest) -> dict:
         # 依存パッケージ未インストール/非Windows等、この環境では構築できないことを示す。
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return {"hidBackend": state.get_hid_settings()}
+
+
+@app.websocket("/ws/hud")
+async def ws_hud(websocket: WebSocket) -> None:
+    """Phase8: モニタリングHUD向けの片方向配信。クライアントからの受信内容は無視する
+    (HUDからループへの書き込みは行わない設計)。"""
+    await state.hud.register(websocket)
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        state.hud.unregister(websocket)
 
 
 # APIルートの後にマウントすることで、/api/* を優先させつつそれ以外を静的フロントエンドとして配信する。

@@ -9,17 +9,26 @@
 from __future__ import annotations
 
 from ..prompts.functions import decompose_goal_to_todo, diagnose_stall
-from ..prompts.schemas import TodoItem
+from ..prompts.schemas import StallDiagnosis, TodoItem
 from .schemas import StepLog
 
 
 class Watchdog:
     def __init__(self, stall_step_threshold: int = 15):
         self._threshold = stall_step_threshold
+        self._last_diagnosis: StallDiagnosis | None = None
 
     @property
     def threshold(self) -> int:
         return self._threshold
+
+    @property
+    def last_diagnosis(self) -> StallDiagnosis | None:
+        """直近のdiagnose_stall呼び出し結果。強制発動(閾値到達)経路では呼ばれないため
+        Noneのままのことがある。HUD等の観測用途の読み取り専用プロパティで、
+        should_interveneの判定ロジック自体には使わない。
+        """
+        return self._last_diagnosis
 
     def should_intervene(self, todo: TodoItem, logs: list[StepLog]) -> bool:
         same_todo_logs = [log for log in logs if log.todoId == todo.todoId]
@@ -30,6 +39,7 @@ class Watchdog:
 
         # 条件1: diagnose_stallが回復不能と判断
         diagnosis = diagnose_stall(todo, self._as_attempt_log(same_todo_logs))
+        self._last_diagnosis = diagnosis
         return diagnosis.shouldRebuildTodo
 
     def rebuild_todo(

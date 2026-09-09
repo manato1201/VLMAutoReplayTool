@@ -197,8 +197,9 @@
     <a href="#phase5">7. Phase5 Watchdog</a>
     <a href="#phase67">8. Phase6/7 R&D</a>
     <a href="#gui">9. GUI</a>
-    <a href="#tests">10. テスト戦略</a>
-    <a href="#swap">11. 差し替えポイント</a>
+    <a href="#hud8">10. Phase8 HUD</a>
+    <a href="#tests">11. テスト戦略</a>
+    <a href="#swap">12. 差し替えポイント</a>
   </nav>
 
   <main>
@@ -446,26 +447,58 @@ sequenceDiagram
     <p><strong>HIDバックエンド選択</strong>: <code>RuntimeState.set_hid_backend()</code>はPhase3の<code>ApiPrimitives</code>を実際に構築し直す(none→Null、sendinput→SendInputBackend、vigem→ViGEmPadBackend)。構築失敗時(未インストール/非Windows等)は422を返し設定は変更しない。デモ実行フロー(DemoGame)はHIDを経由しないため、この設定はStepLogの挙動には影響しない — この環境でPhase3の実装が構築できるかの確認と、実運用差し替えの起点を提供する。</p>
   </section>
 
+  <section id="hud8">
+    <h2>10. Phase8: モニタリングHUD(UI/アニメーション強化)</h2>
+    <p>既存スキーマ(<code>StepLog</code>/<code>TodoItem</code>/<code>StallDiagnosis</code>/<code>ExperienceOutput</code>)をHUDが読み取り専用で消費する片方向データフロー。新規データモデルは作らず、<code>model_dump()</code>をそのままJSON配信する。</p>
+    <div class="mermaid-wrap"><pre class="mermaid">
+sequenceDiagram
+    participant Browser as ブラウザ(hud.html)
+    participant WS as WS /ws/hud
+    participant Broadcaster as HudBroadcaster
+    participant Thread as MainLoopスレッド
+
+    Browser->>WS: WebSocket接続
+    WS->>Broadcaster: register(websocket)
+    Thread->>Broadcaster: publish(step_log)
+    Note over Broadcaster: asyncio.Queue + call_soon_threadsafeで<br/>ワーカースレッドからイベントループへブリッジ
+    Broadcaster-->>Browser: send_json(event)
+    Thread->>Broadcaster: publish(watchdog_intervened)
+    Broadcaster-->>Browser: send_json(event)
+    Thread->>Broadcaster: publish(experience)
+    Broadcaster-->>Browser: send_json(event)
+    </pre></div>
+    <table>
+      <tr><th>type</th><th>発生元</th><th>内容</th></tr>
+      <tr><td><code>todos</code></td><td>decompose() / 再構築後</td><td>todos + completedTodoIds</td></tr>
+      <tr><td><code>step_log</code></td><td>_LiveStepLogSink</td><td>log(StepLogそのまま)</td></tr>
+      <tr><td><code>watchdog_intervened</code></td><td>_apply_watchdog_rebuild()</td><td>stepIndex/message/diagnosis/intervention</td></tr>
+      <tr><td><code>experience</code></td><td>完走後の後処理</td><td>experience(ExperienceOutputそのまま)</td></tr>
+      <tr><td><code>skills</code></td><td>add_skill() / remove_skill()</td><td>skills配列</td></tr>
+    </table>
+    <p>5コンポーネント: <strong>セグメントレール</strong>(単一WS購読を共有する3タブ切り替え)、<strong>フォーカスリング</strong>(最新<code>step_log.todoId</code>のみで判定)、<strong>ドットチャート</strong>(<code>watchdog_intervened.stepIndex</code>と一致するドットのみ赤)、<strong>スタックトースト</strong>(<code>experience.summary</code>/<code>diagnosis.rootCause</code>をそのまま表示)、<strong>ラジアルプログレス</strong>(TODO再構築後も分母が新件数に追従)。</p>
+    <p><strong>回帰修正</strong>: <code>Watchdog.last_diagnosis</code>は閾値到達(強制発動)経路では更新されないため、無条件に配信すると無関係な過去の診断結果を介入理由として誤表示する不具合があった(実機検証で発見)。<code>diagnosis.shouldRebuildTodo is True</code>の場合のみ<code>diagnosis</code>を配信し、それ以外は<code>message</code>(サーバ側要約)にフォールバックして解消。</p>
+  </section>
+
   <section id="tests">
-    <h2>10. テスト戦略</h2>
-    <p>決定的フェイクゲームを用い、実VLM/実HIDなしでコアフローを検証する60件のテスト。</p>
+    <h2>11. テスト戦略</h2>
+    <p>決定的フェイクゲームを用い、実VLM/実HIDなしでコアフローを検証する67件のテスト。</p>
     <table>
       <tr><th>ファイル</th><th>検証内容</th></tr>
       <tr><td><code>test_prompts.py</code></td><td>Phase1: 9関数の型付き入出力、モデル差し替え可能性</td></tr>
       <tr><td><code>test_main_loop.py</code></td><td>Phase2: 決定的完走、状態変化駆動の進行</td></tr>
-      <tr><td><code>test_watchdog.py</code></td><td>Phase5: 二重条件、再構築スコープの厳密化</td></tr>
+      <tr><td><code>test_watchdog.py</code></td><td>Phase5: 二重条件、再構築スコープの厳密化、last_diagnosisの更新条件</td></tr>
       <tr><td><code>test_skill_runner.py</code></td><td>Phase3: procedure/script二層、サンドボックス、ホワイトリスト</td></tr>
       <tr><td><code>test_rag_boundary.py</code></td><td>Phase4: RAG境界のAST静的解析</td></tr>
       <tr><td><code>test_skill_extraction.py</code></td><td>Phase6: 3ステップ反復→1マージ済みSkill</td></tr>
       <tr><td><code>test_navigation.py</code></td><td>Phase7: 4段パイプライン、偽陽性防御、descriptorキャッシュ</td></tr>
       <tr><td><code>test_final_integration.py</code></td><td>Final Phase: procedureスキルの非強制性</td></tr>
-      <tr><td><code>test_gui_server.py</code></td><td>GUI: バリデーション、デモ完走、進捗・観測画像・スキルCRUD・Watchdog介入と再構築・HID設定</td></tr>
+      <tr><td><code>test_gui_server.py</code></td><td>GUI: バリデーション、デモ完走、進捗・観測画像・スキルCRUD・Watchdog介入と再構築・HID設定・HUD WebSocket配信</td></tr>
     </table>
     <pre class="codeblock">.venv/Scripts/pytest -q</pre>
   </section>
 
   <section id="swap">
-    <h2>11. 差し替えポイント一覧</h2>
+    <h2>12. 差し替えポイント一覧</h2>
     <table>
       <tr><th>差し替え対象</th><th>Protocol</th><th>既定実装</th><th>本番実装の例</th></tr>
       <tr><td>基盤モデル呼び出し</td><td><code>FoundationModelClient</code></td><td>Scripted/Demo</td><td>Claude/GPT-4V等のVLM APIラッパー</td></tr>
