@@ -1,19 +1,12 @@
-"""GUIバックエンドの実行状態。DemoModelClient/DemoGameでコアエンジンを実際に動かす。
-
-重要: ここで使う DemoModelClient は実VLM呼び出しの代替であり、GUIをその場で操作確認
-できるようにするための決定的なスタブ。実運用ではこのモジュールを経由せず、
-`prompts.model_client.configure_model_client()` に実クライアントを注入すればよい
-(GUI側・MainLoop側のコードは一切変更不要 — Phase1の差し替え可能性の要件通り)。
+"""GUIバックエンドの実行状態(RuntimeState)。DemoModelClient/DemoGameでコアエンジンを
+実際に動かす(実装は`demo.py`、観測画像レンダリングは`observation_render.py`に分離)。
 """
 from __future__ import annotations
 
 import datetime
-import re
 import threading
-import time
 import uuid
 from pathlib import Path
-from typing import Any, ClassVar
 
 from ..actions.api_primitives import (
     ApiPrimitives,
@@ -30,17 +23,8 @@ from ..loop.main_loop import MainLoop
 from ..loop.schemas import StepLog
 from ..loop.watchdog import Watchdog
 from ..prompts.functions import decompose_goal_to_todo, extract_experience
-from ..prompts.schemas import (
-    DecomposeGoalOutput,
-    ExperienceOutput,
-    ExplainActionOutput,
-    GeneratedCode,
-    MergedOperation,
-    NextActionOutput,
-    ScreenChangeSummary,
-    StallDiagnosis,
-    TodoItem,
-)
+from ..prompts.schemas import StallDiagnosis, TodoItem
+from .demo import DemoExecutor, DemoGame
 from .hud_broadcast import HudBroadcaster
 from .persistence import SqlitePersistence
 
@@ -59,7 +43,7 @@ HID_BACKEND_LABELS: dict[str, str] = {
 def _build_hid_backends(name: str) -> tuple[PadBackend, KeyboardMouseBackend]:
     """選んだバックエンド名からPad/KeyboardMouseの実装ペアを構築する。
 
-    実際に構築するだけで、まだGUIのデモ実行フロー(DemoGame/_DemoExecutor)には
+    実際に構築するだけで、まだGUIのデモ実行フロー(DemoGame/DemoExecutor)には
     接続しない — DemoGame側はHIDを一切経由しない決定的なスタブなので、ここで
     選んだバックエンドは主に「この環境でPhase3の実HID実装が構築できるか」を
     その場で確認する目的と、実運用でScreenCapture/ActionExecutorを実キャプチャ・
@@ -74,138 +58,6 @@ def _build_hid_backends(name: str) -> tuple[PadBackend, KeyboardMouseBackend]:
     raise ValueError(f"未知のHIDバックエンドです: {name}")
 
 
-class DemoModelClient:
-    """9つのtaskすべてに対して決定的な応答を返すデモ用FoundationModelClient実装。"""
-
-    _ACTION_VERBS: ClassVar[list[str]] = ["周囲を観察する", "目標に向けて前進する", "状況を確認する"]
-
-    def complete(self, *, task: str, payload: dict[str, Any], images: list[bytes] | None, response_model: Any) -> Any:
-        handler = getattr(self, f"_{task}", None)
-        if handler is None:
-            raise NotImplementedError(f"DemoModelClient: 未対応のtaskです: {task}")
-        return handler(payload)
-
-    def _decompose_goal_to_todo(self, payload: dict) -> DecomposeGoalOutput:
-        goal = payload["goal"]
-        todos = [
-            TodoItem(
-                todoId=uuid.uuid4().hex[:8], description=f"{goal}: 準備", doneCriteria="準備が整った状態が観測できる"
-            ),
-            TodoItem(
-                todoId=uuid.uuid4().hex[:8], description=f"{goal}: 実行", doneCriteria="目標状態への到達が観測できる"
-            ),
-            TodoItem(todoId=uuid.uuid4().hex[:8], description=f"{goal}: 確認", doneCriteria="達成が確認できる"),
-        ]
-        return DecomposeGoalOutput(todos=todos, ragContextUsed=payload.get("rag_context", []))
-
-    def _generate_next_action(self, payload: dict) -> NextActionOutput:
-        step = len(payload.get("history", []))
-        return NextActionOutput(actionType="api", actionId="advance", params={"step": step})
-
-    def _explain_action_choice(self, payload: dict) -> ExplainActionOutput:
-        step = payload["context"].get("step", 0)
-        todo_desc = payload["context"]["todo"]["description"]
-        verb = self._ACTION_VERBS[step % len(self._ACTION_VERBS)]
-        return ExplainActionOutput(reasoning=f"「{todo_desc}」達成のため、{verb}(ステップ{step})")
-
-    def _summarize_screen_change(self, payload: dict) -> ScreenChangeSummary:
-        return ScreenChangeSummary(summary="画面上の進捗インジケータが1段階進行した")
-
-    def _extract_experience(self, payload: dict) -> ExperienceOutput:
-        return ExperienceOutput(
-            title="デモ実行の経験", summary="デモ実行が正常に進行した", problem="なし", betterWay="なし"
-        )
-
-    def _merge_duplicate_operations(self, payload: dict) -> MergedOperation:
-        return MergedOperation(mergedSkillId=uuid.uuid4().hex[:8], paramSchema={})
-
-    def _generate_code_from_video_and_procedure(self, payload: dict) -> GeneratedCode:
-        return GeneratedCode(scriptCode="pass\n", sourceTrace=[payload.get("video_ref", "")])
-
-    def _extract_reusable_subroutine(self, payload: dict) -> list:
-        return []
-
-    def _diagnose_stall(self, payload: dict) -> StallDiagnosis:
-        return StallDiagnosis(rootCause="停滞なし(デモ)", nextApproach="続行", shouldRebuildTodo=False)
-
-
-class DemoGame:
-    """決定的なデモ用のゲーム代替。実運用ではScreenCapture/ActionExecutorを実HIDに差し替える。"""
-
-    def __init__(self, steps_to_win: int = 5, step_delay_sec: float = 0.5):
-        self._progress = 0
-        self._steps_to_win = steps_to_win
-        # 見た目のペース調整のみ。ループの進行判定はresultObservationSummaryに基づき、
-        # このディレイに依存しない(Phase2の要件通り)。
-        self._step_delay_sec = step_delay_sec
-
-    @property
-    def progress(self) -> int:
-        return self._progress
-
-    @property
-    def steps_to_win(self) -> int:
-        return self._steps_to_win
-
-    def capture(self) -> bytes:
-        return f"progress={self._progress}/{self._steps_to_win}".encode()
-
-    def apply(self, action: NextActionOutput) -> None:
-        if action.actionType == "api" and action.actionId == "advance":
-            self._progress += 1
-        time.sleep(self._step_delay_sec)
-
-    def is_done(self) -> bool:
-        return self._progress >= self._steps_to_win
-
-
-_DEMO_OBSERVATION_RE = re.compile(r"progress=(\d+)/(\d+)")
-
-
-def _render_progress_svg(progress: int, steps_to_win: int) -> bytes:
-    """DemoGameの観測(`progress=X/Y`)をStepLogのサムネイル用SVGへ変換する。
-
-    実運用でScreenCaptureを実キャプチャに差し替えた場合、observationRefは実際の
-    スクリーンショットバイト列/URLを指すため、この合成描画は経由しない
-    (GET /api/observation/{ref} がそのままバイト列を返すだけでよくなる)。
-    """
-    width, height = 240, 135
-    ratio = (progress / steps_to_win) if steps_to_win else 0.0
-    bar_width = round(200 * min(max(ratio, 0.0), 1.0))
-    return (
-        f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" '
-        f'viewBox="0 0 {width} {height}">'
-        f'<rect width="{width}" height="{height}" fill="#150f23"/>'
-        f'<text x="16" y="32" fill="#ffffff" font-family="Rubik, sans-serif" font-size="14" '
-        f'font-weight="600">DEMO SCREEN</text>'
-        f'<rect x="16" y="60" width="200" height="16" rx="8" fill="#362d59"/>'
-        f'<rect x="16" y="60" width="{bar_width}" height="16" rx="8" fill="#c2ef4e"/>'
-        f'<text x="16" y="100" fill="#bdb8c0" font-family="Rubik, sans-serif" font-size="12">'
-        f"progress {progress} / {steps_to_win}</text>"
-        f"</svg>"
-    ).encode()
-
-
-def _render_placeholder_svg(observation: bytes) -> bytes:
-    text = observation.decode(errors="ignore")[:40]
-    return (
-        '<svg xmlns="http://www.w3.org/2000/svg" width="240" height="135" viewBox="0 0 240 135">'
-        '<rect width="240" height="135" fill="#150f23"/>'
-        '<text x="16" y="32" fill="#ffffff" font-family="Rubik, sans-serif" font-size="14" '
-        'font-weight="600">OBSERVATION</text>'
-        f'<text x="16" y="70" fill="#bdb8c0" font-family="Monaco, monospace" font-size="11">{text}</text>'
-        "</svg>"
-    ).encode()
-
-
-def render_observation_svg(observation: bytes) -> bytes:
-    """観測バイト列(デモ形式)をStepLogサムネイル用のSVGにレンダリングする。"""
-    match = _DEMO_OBSERVATION_RE.fullmatch(observation.decode(errors="ignore"))
-    if match is None:
-        return _render_placeholder_svg(observation)
-    return _render_progress_svg(int(match.group(1)), int(match.group(2)))
-
-
 class _StateObservationStore:
     """観測バイト列をRuntimeStateへ保存し、`/api/observation/{ref}`から参照可能にする。"""
 
@@ -217,14 +69,6 @@ class _StateObservationStore:
         with self._state.lock:
             self._state.observations[ref] = observation
         return ref
-
-
-class _DemoExecutor:
-    def __init__(self, game: DemoGame):
-        self._game = game
-
-    def execute(self, action: NextActionOutput) -> None:
-        self._game.apply(action)
 
 
 class _LiveStepLogSink:
@@ -342,6 +186,11 @@ class RuntimeState:
             self.active_todo_id = None
             self.error = None
             self._current_game = None
+        # self.logsをリセットしたのと同様に、HUD(hud.js)が保持しているStepLog/
+        # ドットチャートの蓄積もクリアさせる。これが無いと、REST版ダッシュボード
+        # (index.html)の実行ログは新しいゴールの分解と同時に空になるのに対し、
+        # HUD側だけ前のゴールのStepLogが残り続けるという不整合が生じる。
+        self.hud.publish({"type": "logs_reset"})
         self._publish_todos()
         return result.todos
 
@@ -366,6 +215,11 @@ class RuntimeState:
 
         run_id = f"run-{uuid.uuid4().hex[:10]}"
         self.db.start_run(run_id, todo.todoId, todo.description, started_at=_now_iso())
+        # HUD(hud.js)はstepIndexを一意なキーとしてドットチャート/ログフィードを描画するため、
+        # 新しいRunが始まったことを明示的に伝え、前のRunのStepLogの蓄積をクリアさせる。
+        # これが無いと、2回目以降の実行でstepIndexが0から再スタートし、
+        # 前のRunのドット/ログと混ざって表示されてしまう。
+        self.hud.publish({"type": "run_started", "runId": run_id, "todoId": todo_id})
 
         steps_to_win = 999 if stall_demo else 5
         game = DemoGame(steps_to_win=steps_to_win, step_delay_sec=0.3 if stall_demo else 0.5)
@@ -377,7 +231,7 @@ class RuntimeState:
                 capture=game,
                 observation_store=_StateObservationStore(self),
                 step_log_sink=_LiveStepLogSink(self, run_id),
-                executor=_DemoExecutor(game),
+                executor=DemoExecutor(game),
                 watchdog=self._watchdog,
                 todo_done_checker=lambda t, obs: game.is_done(),
             )

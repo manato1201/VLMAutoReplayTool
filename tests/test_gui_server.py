@@ -1,13 +1,10 @@
-"""GUI: FastAPIサーバのエンドポイント検証。
+"""GUI: FastAPIサーバのREST APIエンドポイント検証(バリデーション/CRUD/永続化)。
+
+Phase8のWebSocket(HUD)配信に関するテストは `test_gui_hud.py` を参照(共有する
+`client` フィクスチャは `conftest.py` に定義)。
 
 DemoModelClient/DemoGameが既定で動くため、実VLM/実HIDなしでエンドツーエンドに近い
-形で検証できる。モデルクライアントのグローバル状態は他テストと共有されるため、
-各テストの前後で明示的にリセットしてから TestClient のlifespan(起動時のみ
-DemoModelClientを注入する)に解決させる。
-
-RuntimeStateはSQLiteに永続化するため、テストがユーザーの実DB
-(~/.vlm_auto_replay/gui.sqlite3)に触れないよう、テストごとに`:memory:`DBを
-持つ新しいRuntimeStateへ差し替える(サーバ本体のモジュールグローバルをmonkeypatch)。
+形で検証できる。
 """
 
 from __future__ import annotations
@@ -15,22 +12,6 @@ from __future__ import annotations
 import time
 
 import pytest
-from fastapi.testclient import TestClient
-
-from vlm_auto_replay.prompts.model_client import reset_model_client
-
-
-@pytest.fixture
-def client(monkeypatch):
-    reset_model_client()
-    import vlm_auto_replay.gui.server as server_module
-    from vlm_auto_replay.gui.runtime import RuntimeState
-
-    monkeypatch.setattr(server_module, "state", RuntimeState(db_path=":memory:"))
-
-    with TestClient(server_module.app) as c:
-        yield c
-    reset_model_client()
 
 
 def test_decompose_rejects_empty_goal(client):
@@ -251,95 +232,3 @@ def test_settings_switch_to_unknown_backend_returns_400(client):
     # 失敗時は元の設定(none)のまま変わらない。
     assert client.get("/api/settings").json()["hidBackend"]["current"] == "none"
 
-
-# --- Phase8: モニタリングHUD(WebSocket配信) -------------------------------
-
-
-def test_hud_websocket_receives_todos_event_after_decompose(client):
-    with client.websocket_connect("/ws/hud") as ws:
-        resp = client.post("/api/todo/decompose", json={"goal": "HUDテスト"})
-        todos = resp.json()["todos"]
-        event = ws.receive_json()
-        assert event["type"] == "todos"
-        assert [t["todoId"] for t in event["todos"]] == [t["todoId"] for t in todos]
-        assert event["completedTodoIds"] == []
-
-
-def test_hud_websocket_receives_step_log_events_in_order(client):
-    resp = client.post("/api/todo/decompose", json={"goal": "HUD step"})
-    todo = resp.json()["todos"][0]
-    with client.websocket_connect("/ws/hud") as ws:
-        client.post("/api/run/start", json={"todoId": todo["todoId"], "maxSteps": 12})
-        first = ws.receive_json()
-        second = ws.receive_json()
-        assert first["type"] == "step_log"
-        assert first["log"]["stepIndex"] == 0
-        assert second["type"] == "step_log"
-        assert second["log"]["stepIndex"] == 1
-
-
-def test_hud_websocket_receives_experience_toast_after_done_run(client):
-    """完走(status=="done")後にextract_experience(Phase1)がHUD配信されること。"""
-    resp = client.post("/api/todo/decompose", json={"goal": "HUD experience"})
-    todo = resp.json()["todos"][0]
-    with client.websocket_connect("/ws/hud") as ws:
-        client.post("/api/run/start", json={"todoId": todo["todoId"], "maxSteps": 12})
-        experience_event = None
-        for _ in range(30):
-            event = ws.receive_json()
-            if event["type"] == "experience":
-                experience_event = event
-                break
-        assert experience_event is not None
-        assert experience_event["experience"]["title"]
-
-
-def test_hud_websocket_receives_watchdog_intervened_event_and_todos_update(client):
-    """stallDemoでWatchdogが実際に介入した際、watchdog_intervenedイベントと
-    再構築後のtodosイベントの両方がHUDへ配信されること。stepIndexは0始まりなので
-    閾値(既定8)到達時点のstepIndexは7になる。
-    """
-    resp = client.post("/api/todo/decompose", json={"goal": "HUD intervene"})
-    todo = resp.json()["todos"][0]
-    with client.websocket_connect("/ws/hud") as ws:
-        client.post(
-            "/api/run/start", json={"todoId": todo["todoId"], "maxSteps": 20, "stallDemo": True}
-        )
-        intervened_event = None
-        todos_after_rebuild = None
-        for _ in range(30):
-            event = ws.receive_json()
-            if event["type"] == "watchdog_intervened":
-                intervened_event = event
-            elif event["type"] == "todos" and intervened_event is not None:
-                todos_after_rebuild = event
-                break
-
-        assert intervened_event is not None
-        assert intervened_event["stepIndex"] == 7
-        assert intervened_event["message"]
-        assert intervened_event["intervention"]["todoId"] == todo["todoId"]
-        # DemoModelClientのdiagnose_stallは常にshouldRebuildTodo=Falseを返すため、この介入は
-        # 閾値到達(強制発動)経路によるもの。直近のdiagnose_stall結果(無関係・古い可能性がある)を
-        # 理由として誤配信しないよう、diagnosisはNoneであること(回帰テスト)。
-        assert intervened_event["diagnosis"] is None
-        assert "8ステップ継続" in intervened_event["message"]
-
-        assert todos_after_rebuild is not None
-        remaining_ids = [t["todoId"] for t in todos_after_rebuild["todos"]]
-        assert todo["todoId"] not in remaining_ids
-
-
-def test_hud_websocket_receives_skills_event_on_add_and_remove(client):
-    with client.websocket_connect("/ws/hud") as ws:
-        resp = client.post("/api/skills", json={"gameTitle": "HUDGame", "proceduralText": "1. do it"})
-        skill_id = resp.json()["skill"]["skillId"]
-
-        added_event = ws.receive_json()
-        assert added_event["type"] == "skills"
-        assert any(s["skillId"] == skill_id for s in added_event["skills"])
-
-        client.delete(f"/api/skills/{skill_id}")
-        removed_event = ws.receive_json()
-        assert removed_event["type"] == "skills"
-        assert all(s["skillId"] != skill_id for s in removed_event["skills"])

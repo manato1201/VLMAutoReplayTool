@@ -71,7 +71,7 @@ flowchart TB
 | `src/vlm_auto_replay/knowledge/` | Phase4 | RAGクライアント・Experience・TODO生成前段オーケストレーション | フル実装 |
 | `src/vlm_auto_replay/skills/` | Phase6 | スキル自動抽出・受け入れゲート | 軽量実装(反復前提) |
 | `src/vlm_auto_replay/navigation/` | Phase7 | 視覚的自己位置推定パイプライン | 軽量実装(反復前提) |
-| `src/vlm_auto_replay/gui/` | — | 操作用Webダッシュボード(FastAPI) | フル実装(デモモデル/デモゲーム同梱) |
+| `src/vlm_auto_replay/gui/` | — | 操作用Webダッシュボード(FastAPI)+Phase8 HUD | フル実装(`demo.py`にDemoModelClient/DemoGame、`observation_render.py`にSVG描画を分離) |
 
 ```mermaid
 graph LR
@@ -369,10 +369,14 @@ sequenceDiagram
 | `type` | 発生元 | 内容 |
 |---|---|---|
 | `todos` | `decompose()` / `_apply_watchdog_rebuild()` | `todos`(TodoItem配列)+`completedTodoIds` |
+| `run_started` | `start_run()`(スレッド起動前) | `runId` / `todoId` |
+| `logs_reset` | `decompose()` | (フィールドなし) |
 | `step_log` | `_LiveStepLogSink.log_step()` | `log`(StepLogそのまま) |
 | `watchdog_intervened` | `_apply_watchdog_rebuild()` | `stepIndex` / `message` / `diagnosis`(StallDiagnosisまたはnull) / `intervention` |
 | `experience` | 完走(`status=="done"`)後の後処理 | `experience`(ExperienceOutputそのまま、`extract_experience`をその場で呼び出す) |
 | `skills` | `add_skill()` / `remove_skill()` | `skills`(Skill配列) |
+
+**`run_started`/`logs_reset`(リファクタリングで追加)**: `stepIndex`はRunごと・ゴール分解ごとに0から振り直される。当初はこの2イベントが無く、HUDが1ページ読み込みで複数回実行すると、前RunのStepLogとドットチャートが新しいRunのものと混在して誤表示になっていた(実機検証で発見)。`start_run()`はスレッド起動前に`run_started`を、`decompose()`は`self.logs`を空にするのと同時に`logs_reset`を配信し、`hud.js`はどちらのイベントでも`stepLogs`/`stallStepIndices`/`lastStepTodoId`をクリアする(`clearStepLogState()`に共通化)。
 
 **5つのHUDコンポーネント**(`gui/static/hud.html` + `hud.js`):
 
@@ -382,13 +386,15 @@ sequenceDiagram
 4. **スタックトースト** — `experience`イベントは`experience.summary`を、`watchdog_intervened`イベントは`diagnosis`が非nullの場合のみ`diagnosis.rootCause`をそのまま表示する。
 5. **ラジアルプログレス** — `completedTodoIds.length / todos.length`を円環ゲージで描画する。`_apply_watchdog_rebuild()`が`todos`イベントを再配信するため、TODO再構築後も分母(`total`)が新しいTODO件数に追従する。
 
-**「もっともらしいが誤った」表示の回避(重要な修正)**: `Watchdog.last_diagnosis`(Phase5に追加した読み取り専用プロパティ)は、`should_intervene()`が閾値到達(強制発動)経路で早期リターンした場合には更新されない — つまり直前の呼び出し結果が残ったままになる。ここで`last_diagnosis`を無条件に「介入理由」としてHUDへ配信すると、無関係な過去の診断結果("停滞なし"等)を今回の介入理由であるかのように誤表示してしまう不具合が実際に発生した(ヘッドレスブラウザでの実機検証で発見)。`_apply_watchdog_rebuild()`は`diagnosis.shouldRebuildTodo is True`の場合に限り`diagnosis`を配信し、それ以外(閾値到達による強制発動)では`diagnosis: null`とし、`message`フィールド(サーバ側で組み立てた要約文)にフォールバックすることで解消した。`tests/test_gui_server.py`と`tests/test_watchdog.py`の双方に回帰テストがある。
+**「もっともらしいが誤った」表示の回避(重要な修正)**: `Watchdog.last_diagnosis`(Phase5に追加した読み取り専用プロパティ)は、`should_intervene()`が閾値到達(強制発動)経路で早期リターンした場合には更新されない — つまり直前の呼び出し結果が残ったままになる。ここで`last_diagnosis`を無条件に「介入理由」としてHUDへ配信すると、無関係な過去の診断結果("停滞なし"等)を今回の介入理由であるかのように誤表示してしまう不具合が実際に発生した(ヘッドレスブラウザでの実機検証で発見)。`_apply_watchdog_rebuild()`は`diagnosis.shouldRebuildTodo is True`の場合に限り`diagnosis`を配信し、それ以外(閾値到達による強制発動)では`diagnosis: null`とし、`message`フィールド(サーバ側で組み立てた要約文)にフォールバックすることで解消した。`tests/test_watchdog.py`と`tests/test_gui_hud.py`の双方に回帰テストがある。
+
+**初期ハイドレーション(リファクタリングで追加)**: WebSocketは「これから起きること」しか配信しないため、既にセッションが進行中の状態でHUDページを開く(または再接続する)と、次のイベントが届くまで画面が空のままになる問題があった。`hud.js`は接続確立時(`ws.onopen`)に`GET /api/status`(ポーリング版ダッシュボードと同じ既存REST)を1回フェッチして`todos`/`completedTodoIds`/`logs`/`skills`を初期状態として埋める。フェッチ中に届いたライブイベントは`pendingDuringHydration`へ退避し、スナップショット適用後にまとめて再生することで、スナップショットによる上書きでライブイベントを取りこぼす競合を避けている。
 
 ---
 
 ## 11. テスト戦略
 
-`tests/` 配下、67件。決定的フェイクゲーム(`tests/fixtures/fake_game.py`)を用い、実VLM/実HIDなしでコアフローをエンドツーエンドに近い形で検証する。共有テストダブル(`InMemoryObservationStore`等)は`tests/fixtures/helpers.py`に集約し、テストファイル間の直接importに依存しない。
+`tests/` 配下、68件。決定的フェイクゲーム(`tests/fixtures/fake_game.py`)を用い、実VLM/実HIDなしでコアフローをエンドツーエンドに近い形で検証する。共有テストダブル(`InMemoryObservationStore`等)は`tests/fixtures/helpers.py`に、GUI用の`client`フィクスチャ(TestClient+`:memory:` RuntimeState)は`conftest.py`に集約し、テストファイル間の直接importに依存しない。
 
 | ファイル | 検証内容 |
 |---|---|
@@ -400,7 +406,8 @@ sequenceDiagram
 | `test_skill_extraction.py` | Phase6: 3ステップ反復→1マージ済みSkill、受け入れゲート |
 | `test_navigation.py` | Phase7: 4段パイプラインの分離、偽陽性防御、状態遷移グラフ整合性、descriptorキャッシュ |
 | `test_final_integration.py` | Final Phase: procedureスキルの非強制性(逸脱の許容) |
-| `test_gui_server.py` | GUI: バリデーション(400/422/404)、デモ完走、進捗・観測画像・スキルCRUD・Watchdog介入と再構築・履歴・HIDバックエンド設定・HUD WebSocket配信(5イベント種別+誤表示防止の回帰テスト) |
+| `test_gui_server.py` | GUI REST API: バリデーション(400/422/404)、デモ完走、進捗・観測画像・スキルCRUD・Watchdog介入と再構築・履歴・HIDバックエンド設定 |
+| `test_gui_hud.py` | Phase8 HUD: `/ws/hud`の6イベント種別、`run_started`/`logs_reset`によるRun間の分離、誤表示防止の回帰テスト |
 
 ```bash
 .venv/Scripts/pytest -q

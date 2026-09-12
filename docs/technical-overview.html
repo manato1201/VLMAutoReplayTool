@@ -470,18 +470,22 @@ sequenceDiagram
     <table>
       <tr><th>type</th><th>発生元</th><th>内容</th></tr>
       <tr><td><code>todos</code></td><td>decompose() / 再構築後</td><td>todos + completedTodoIds</td></tr>
+      <tr><td><code>run_started</code></td><td>start_run()(スレッド起動前)</td><td>runId / todoId</td></tr>
+      <tr><td><code>logs_reset</code></td><td>decompose()</td><td>(フィールドなし)</td></tr>
       <tr><td><code>step_log</code></td><td>_LiveStepLogSink</td><td>log(StepLogそのまま)</td></tr>
       <tr><td><code>watchdog_intervened</code></td><td>_apply_watchdog_rebuild()</td><td>stepIndex/message/diagnosis/intervention</td></tr>
       <tr><td><code>experience</code></td><td>完走後の後処理</td><td>experience(ExperienceOutputそのまま)</td></tr>
       <tr><td><code>skills</code></td><td>add_skill() / remove_skill()</td><td>skills配列</td></tr>
     </table>
     <p>5コンポーネント: <strong>セグメントレール</strong>(単一WS購読を共有する3タブ切り替え)、<strong>フォーカスリング</strong>(最新<code>step_log.todoId</code>のみで判定)、<strong>ドットチャート</strong>(<code>watchdog_intervened.stepIndex</code>と一致するドットのみ赤)、<strong>スタックトースト</strong>(<code>experience.summary</code>/<code>diagnosis.rootCause</code>をそのまま表示)、<strong>ラジアルプログレス</strong>(TODO再構築後も分母が新件数に追従)。</p>
-    <p><strong>回帰修正</strong>: <code>Watchdog.last_diagnosis</code>は閾値到達(強制発動)経路では更新されないため、無条件に配信すると無関係な過去の診断結果を介入理由として誤表示する不具合があった(実機検証で発見)。<code>diagnosis.shouldRebuildTodo is True</code>の場合のみ<code>diagnosis</code>を配信し、それ以外は<code>message</code>(サーバ側要約)にフォールバックして解消。</p>
+    <p><strong>回帰修正1</strong>: <code>Watchdog.last_diagnosis</code>は閾値到達(強制発動)経路では更新されないため、無条件に配信すると無関係な過去の診断結果を介入理由として誤表示する不具合があった(実機検証で発見)。<code>diagnosis.shouldRebuildTodo is True</code>の場合のみ<code>diagnosis</code>を配信し、それ以外は<code>message</code>(サーバ側要約)にフォールバックして解消。</p>
+    <p><strong>回帰修正2(初期ハイドレーション)</strong>: WebSocketは「これから起きること」しか配信しないため、進行中のセッションに途中からHUDを開くと画面が空のままになる問題があった。接続時に<code>GET /api/status</code>を1回フェッチして初期状態を埋め、フェッチ中に届いたライブイベントは退避して後から再生する(スナップショットで上書きして取りこぼさないため)。</p>
+    <p><strong>回帰修正3(Run間の混在)</strong>: <code>stepIndex</code>はRun/ゴール分解ごとに0から振り直されるため、1ページで複数回実行するとドットチャート/ログフィードが前Runのものと混在する不具合があった。<code>run_started</code>/<code>logs_reset</code>イベントを新設し、HUD側がStepLogの蓄積をクリアするトリガーにした。</p>
   </section>
 
   <section id="tests">
     <h2>11. テスト戦略</h2>
-    <p>決定的フェイクゲームを用い、実VLM/実HIDなしでコアフローを検証する67件のテスト。</p>
+    <p>決定的フェイクゲームを用い、実VLM/実HIDなしでコアフローを検証する68件のテスト。</p>
     <table>
       <tr><th>ファイル</th><th>検証内容</th></tr>
       <tr><td><code>test_prompts.py</code></td><td>Phase1: 9関数の型付き入出力、モデル差し替え可能性</td></tr>
@@ -492,7 +496,8 @@ sequenceDiagram
       <tr><td><code>test_skill_extraction.py</code></td><td>Phase6: 3ステップ反復→1マージ済みSkill</td></tr>
       <tr><td><code>test_navigation.py</code></td><td>Phase7: 4段パイプライン、偽陽性防御、descriptorキャッシュ</td></tr>
       <tr><td><code>test_final_integration.py</code></td><td>Final Phase: procedureスキルの非強制性</td></tr>
-      <tr><td><code>test_gui_server.py</code></td><td>GUI: バリデーション、デモ完走、進捗・観測画像・スキルCRUD・Watchdog介入と再構築・HID設定・HUD WebSocket配信</td></tr>
+      <tr><td><code>test_gui_server.py</code></td><td>GUI REST API: バリデーション、デモ完走、進捗・観測画像・スキルCRUD・Watchdog介入と再構築・HID設定</td></tr>
+      <tr><td><code>test_gui_hud.py</code></td><td>Phase8 HUD: /ws/hudの6イベント種別、run_started/logs_resetによるRun間の分離</td></tr>
     </table>
     <pre class="codeblock">.venv/Scripts/pytest -q</pre>
   </section>

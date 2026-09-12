@@ -50,7 +50,7 @@ python -m venv .venv
 .venv/Scripts/pytest -q
 ```
 
-`67 passed` と表示されれば、Phase1〜8のコアロジック(型付きプロンプト関数・メインループ・Skill/API実行・RAG境界・Watchdog・スキル抽出・ナビゲーション)とGUI(FastAPIエンドポイント+SQLite永続化+HUD WebSocket配信)がすべて正常。
+`68 passed` と表示されれば、Phase1〜8のコアロジック(型付きプロンプト関数・メインループ・Skill/API実行・RAG境界・Watchdog・スキル抽出・ナビゲーション)とGUI(FastAPIエンドポイント+SQLite永続化+HUD WebSocket配信)がすべて正常。
 
 **3. GUIサーバを起動する**
 

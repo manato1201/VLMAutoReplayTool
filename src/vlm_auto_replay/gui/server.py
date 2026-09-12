@@ -13,7 +13,9 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from ..prompts.model_client import configure_model_client, get_model_client
-from .runtime import DemoModelClient, RuntimeState, render_observation_svg
+from .demo import DemoModelClient
+from .observation_render import render_observation_svg
+from .runtime import RuntimeState
 
 _STATIC_DIR = Path(__file__).parent / "static"
 
@@ -156,12 +158,18 @@ def api_set_hid_backend(req: HidBackendRequest) -> dict:
 @app.websocket("/ws/hud")
 async def ws_hud(websocket: WebSocket) -> None:
     """Phase8: モニタリングHUD向けの片方向配信。クライアントからの受信内容は無視する
-    (HUDからループへの書き込みは行わない設計)。"""
+    (HUDからループへの書き込みは行わない設計)。
+
+    `finally`でunregisterすることで、切断がWebSocketDisconnect以外の例外
+    (プロトコルエラー等)として現れた場合でも購読者リストに残留させない。
+    """
     await state.hud.register(websocket)
     try:
         while True:
             await websocket.receive_text()
     except WebSocketDisconnect:
+        pass
+    finally:
         state.hud.unregister(websocket)
 
 

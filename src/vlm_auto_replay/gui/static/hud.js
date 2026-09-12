@@ -138,13 +138,117 @@ function pushToast(title, body, variant) {
   setTimeout(() => toast.remove(), 8000);
 }
 
+// 単一のWebSocketイベントをstateへ適用し、影響を受けるビューだけ再描画する。
+// hydrate()からの初期スナップショット適用と、ws.onmessageからのライブ更新の両方が
+// このstate変更ロジックを共有する(セグメントレールと同じ「単一の状態源」原則)。
+// run_started(新しいRun開始)とlogs_reset(新しいゴールの分解)はどちらも
+// 「前のStepLogの蓄積を引き継がない」という同じ効果を持つ。stepIndexはRun/ゴールが
+// 変わるたびに0から振り直されるため、クリアしないとドットチャート/ログフィードが
+// 混在して誤表示になる。
+function clearStepLogState() {
+  state.stepLogs = [];
+  state.stallStepIndices = new Set();
+  state.lastStepTodoId = null;
+  renderDotChart();
+  renderLogFeed();
+  renderTodoView();
+}
+
+function applyEvent(event) {
+  switch (event.type) {
+    case "run_started":
+    case "logs_reset":
+      clearStepLogState();
+      break;
+
+    case "todos":
+      state.todos = event.todos;
+      state.completedTodoIds = event.completedTodoIds;
+      renderTodoView();
+      renderRadialProgress();
+      break;
+
+    case "step_log":
+      state.stepLogs.push(event.log);
+      state.lastStepTodoId = event.log.todoId;
+      renderDotChart();
+      renderLogFeed();
+      renderTodoView(); // フォーカスリングの対象が変わりうる
+      break;
+
+    case "watchdog_intervened":
+      if (event.stepIndex !== null && event.stepIndex !== undefined) {
+        state.stallStepIndices.add(event.stepIndex);
+      }
+      renderDotChart();
+      renderLogFeed();
+      pushToast("Watchdog介入", event.diagnosis ? event.diagnosis.rootCause : event.message, "stall");
+      break;
+
+    case "experience":
+      pushToast(event.experience.title, event.experience.summary, "ok");
+      break;
+
+    case "skills":
+      state.skills = event.skills;
+      renderSkillsView();
+      break;
+
+    default:
+      break;
+  }
+}
+
+// ページ読み込み時点(または再接続時点)で既に進行中のセッションが存在する場合、
+// WebSocketは「これから起きること」しか配信しないため、そのままでは次のイベントが
+// 届くまで画面が空のままになる。/api/status(既存のREST、ポーリング版ダッシュボードと
+// 同じもの)から現在のスナップショットを取得して初期状態を埋める。
+//
+// ハイドレーション中(fetch応答待ち)に届いたライブイベントは`pending`に退避し、
+// スナップショット適用後にまとめて再生する — そうしないと、フェッチ完了時に
+// スナップショットで丸ごと上書きしてしまい、その間に届いたイベントを取りこぼす。
+async function hydrate(pending) {
+  try {
+    const res = await fetch("/api/status");
+    if (!res.ok) return;
+    const snapshot = await res.json();
+
+    state.todos = snapshot.todos;
+    state.completedTodoIds = snapshot.completedTodoIds;
+    state.stepLogs = snapshot.logs;
+    state.skills = snapshot.skills;
+    if (snapshot.logs.length > 0) {
+      state.lastStepTodoId = snapshot.logs[snapshot.logs.length - 1].todoId;
+    }
+    if (snapshot.lastIntervention) {
+      state.stallStepIndices.add(snapshot.lastIntervention.stepCount - 1);
+    }
+  } catch {
+    // ハイドレーションに失敗してもWebSocket配信は引き続き機能するため、致命的ではない。
+  }
+
+  for (const event of pending) {
+    applyEvent(event);
+  }
+  renderTodoView();
+  renderDotChart();
+  renderLogFeed();
+  renderSkillsView();
+  renderRadialProgress();
+}
+
 function connect() {
   const protocol = location.protocol === "https:" ? "wss:" : "ws:";
   const ws = new WebSocket(`${protocol}//${location.host}/ws/hud`);
+  let hydrating = true;
+  const pendingDuringHydration = [];
 
   ws.onopen = () => {
     wsStatusEl.textContent = "WS: 接続済み";
     wsStatusEl.classList.add("connected");
+    hydrate(pendingDuringHydration).finally(() => {
+      hydrating = false;
+    });
   };
 
   ws.onclose = () => {
@@ -155,47 +259,11 @@ function connect() {
 
   ws.onmessage = (raw) => {
     const event = JSON.parse(raw.data);
-    switch (event.type) {
-      case "todos":
-        state.todos = event.todos;
-        state.completedTodoIds = event.completedTodoIds;
-        renderTodoView();
-        renderRadialProgress();
-        break;
-
-      case "step_log":
-        state.stepLogs.push(event.log);
-        state.lastStepTodoId = event.log.todoId;
-        renderDotChart();
-        renderLogFeed();
-        renderTodoView(); // フォーカスリングの対象が変わりうる
-        break;
-
-      case "watchdog_intervened":
-        if (event.stepIndex !== null && event.stepIndex !== undefined) {
-          state.stallStepIndices.add(event.stepIndex);
-        }
-        renderDotChart();
-        renderLogFeed();
-        pushToast(
-          "Watchdog介入",
-          event.diagnosis ? event.diagnosis.rootCause : event.message,
-          "stall"
-        );
-        break;
-
-      case "experience":
-        pushToast(event.experience.title, event.experience.summary, "ok");
-        break;
-
-      case "skills":
-        state.skills = event.skills;
-        renderSkillsView();
-        break;
-
-      default:
-        break;
+    if (hydrating) {
+      pendingDuringHydration.push(event);
+      return;
     }
+    applyEvent(event);
   };
 }
 
