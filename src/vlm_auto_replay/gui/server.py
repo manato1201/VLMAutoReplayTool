@@ -16,6 +16,7 @@ from ..prompts.model_client import configure_model_client, get_model_client
 from .demo import DemoModelClient
 from .observation_render import render_observation_svg
 from .runtime import RuntimeState
+from .security import install_request_guard, websocket_allowed
 
 _STATIC_DIR = Path(__file__).parent / "static"
 
@@ -43,6 +44,8 @@ async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(title="VLMAutoReplayTool Control Panel", lifespan=_lifespan)
+# 認証の無いローカル GUI(実際に入力操作を起動できる)を、別サイトのページ(CSRF)や DNS rebinding から守る
+install_request_guard(app)
 state = RuntimeState()
 
 
@@ -163,6 +166,11 @@ async def ws_hud(websocket: WebSocket) -> None:
     `finally`でunregisterすることで、切断がWebSocketDisconnect以外の例外
     (プロトコルエラー等)として現れた場合でも購読者リストに残留させない。
     """
+    # ブラウザは WebSocket に同一オリジン制限をかけない。別サイトのページが観測を購読できないよう、
+    # ハンドシェイクの Host / Origin を検査する(ミドルウェアは WebSocket を通らない)。
+    if not websocket_allowed(websocket.headers):
+        await websocket.close(code=1008)
+        return
     await state.hud.register(websocket)
     try:
         while True:

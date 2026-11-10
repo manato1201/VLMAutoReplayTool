@@ -46,3 +46,9 @@ def client(monkeypatch):
     with TestClient(server_module.app) as c:
         yield c
     reset_model_client()
+
+
+@pytest.fixture(autouse=True)
+def _allow_testserver_host(monkeypatch):
+    """TestClient は Host: testserver で送る。Host の許可リスト(gui/security.py)に足しておく。"""
+    monkeypatch.setenv("VLM_ALLOWED_HOSTS", "testserver")

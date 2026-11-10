@@ -83,6 +83,16 @@ python -m venv .venv
 
 (別途 [ViGEmBus](https://github.com/ViGEm/ViGEmBus) ドライバのインストールが必要)
 
+## セキュリティ(操作GUI)
+
+GUIは認証を持たず、`127.0.0.1` だけで待ち受ける。ただし `POST /api/run/start` は実際にキー入力・クリックを起動するため、ブラウザで開いた別サイトのページから叩かれないよう、次を検査する(`gui/security.py`)。
+
+- **Hostの許可リスト**: 既定はループバックのみ(DNS rebinding対策)。別のホスト名で開くときは環境変数 `VLM_ALLOWED_HOSTS`(カンマ区切り)に足す。
+- **変更操作のOrigin**: POST/PUT/PATCH/DELETE は、Originが自分のHostと同じときだけ通る(Originを付けないcurlやテストは通る)。
+- **`/ws/hud`**: ハンドシェイクのHost・Originを同じ基準で検査する。
+
+これは**認証ではない**。複数人で使う場合は、実行できる人を限る認証と役割が別に要る。
+
 ## モデル・HIDバックエンドの差し替え
 
 - 基盤モデル呼び出しは `prompts/model_client.py` の `FoundationModelClient` Protocolを実装し、`configure_model_client()` で注入する。テストでは決定的な `ScriptedFoundationModelClient` を使用している。実運用ではVLM APIをラップした実装を注入する(ベンダー名はループ本体に埋め込まない)。
