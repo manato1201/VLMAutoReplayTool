@@ -1,0 +1,97 @@
+// 認証(VLM_AUTH=required)用のログイン画面。off(既定)のときは何も表示しない。
+//
+// app.js / hud.js は変えない。/api/* が 401 を返したときだけ、ログインの重ね表示を出す。
+// API キーは JS からは読めない HttpOnly・SameSite=Strict のクッキーになる(サーバー側で設定)。
+// 権限の判断はサーバー側(403)。ここは「入口」と「誰で入っているか」の表示だけ。
+(() => {
+  const nativeFetch = window.fetch.bind(window);
+  let overlay = null;
+
+  function el(tag, props = {}, children = []) {
+    const node = Object.assign(document.createElement(tag), props);
+    for (const c of children) node.append(c);
+    return node;
+  }
+
+  function showLogin(message) {
+    if (overlay) return;
+    const input = el("input", {
+      id: "login-api-key",
+      type: "password",
+      autocomplete: "off",
+      required: true,
+      className: "text-input",
+    });
+    const error = el("p", { className: "error-text", role: "alert", textContent: message || "" });
+    const submit = el("button", { type: "submit", className: "btn-primary", textContent: "ログイン" });
+    const form = el("form", {}, [
+      el("label", { htmlFor: "login-api-key", textContent: "API キー" }),
+      input,
+      submit,
+      error,
+    ]);
+    Object.assign(form.style, { display: "grid", gap: "8px" });
+    form.addEventListener("submit", async (ev) => {
+      ev.preventDefault();
+      submit.disabled = true;
+      try {
+        const res = await nativeFetch("/api/auth/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ api_key: input.value.trim() }),
+        });
+        if (res.ok) {
+          location.reload();
+          return;
+        }
+        const detail = await res.json().catch(() => ({}));
+        error.textContent = detail.detail || `ログインに失敗しました(${res.status})`;
+        input.value = "";
+      } finally {
+        submit.disabled = false;
+      }
+    });
+    const card = el("div", { className: "panel" }, [
+      el("h2", { className: "panel-title", textContent: "ログインが必要です" }),
+      el("p", { className: "caption", textContent: "管理者から受け取った API キーを入れてください。" }),
+      form,
+    ]);
+    Object.assign(card.style, { width: "min(420px, calc(100vw - 32px))" });
+    overlay = el("div", { role: "dialog", ariaModal: "true" }, [card]);
+    Object.assign(overlay.style, {
+      position: "fixed",
+      inset: "0",
+      zIndex: "1000",
+      display: "grid",
+      placeItems: "center",
+      background: "rgba(21, 15, 35, 0.92)",
+    });
+    document.body.append(overlay);
+    input.focus();
+  }
+
+  window.fetch = async (input, init) => {
+    const res = await nativeFetch(input, init);
+    const url = typeof input === "string" ? input : input.url;
+    if (res.status === 401 && url.startsWith("/api/") && !url.startsWith("/api/auth/")) {
+      showLogin();
+    }
+    return res;
+  };
+
+  // required で入っているときだけ、誰で入っているか(と、ログアウト)を右上に出す。
+  nativeFetch("/api/auth/me")
+    .then((r) => r.json())
+    .then((me) => {
+      if (me.mode !== "required" || !me.authenticated) return;
+      const logout = el("button", { type: "button", className: "btn-primary", textContent: "ログアウト" });
+      logout.addEventListener("click", async () => {
+        await nativeFetch("/api/auth/logout", { method: "POST" });
+        location.reload();
+      });
+      const strip = el("div", { className: "eyebrow", textContent: `${me.name}(${me.role}) ` }, [logout]);
+      Object.assign(strip.style, { position: "fixed", right: "12px", bottom: "8px", zIndex: "900" });
+      document.body.append(strip);
+    })
+    .catch(() => {});
+})();

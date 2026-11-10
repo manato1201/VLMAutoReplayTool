@@ -85,13 +85,37 @@ python -m venv .venv
 
 ## セキュリティ(操作GUI)
 
-GUIは認証を持たず、`127.0.0.1` だけで待ち受ける。ただし `POST /api/run/start` は実際にキー入力・クリックを起動するため、ブラウザで開いた別サイトのページから叩かれないよう、次を検査する(`gui/security.py`)。
+GUIは既定では認証を持たず、`127.0.0.1` だけで待ち受ける。ただし `POST /api/run/start` は実際にキー入力・クリックを起動するため、ブラウザで開いた別サイトのページから叩かれないよう、次を検査する(`gui/security.py`)。
 
 - **Hostの許可リスト**: 既定はループバックのみ(DNS rebinding対策)。別のホスト名で開くときは環境変数 `VLM_ALLOWED_HOSTS`(カンマ区切り)に足す。
 - **変更操作のOrigin**: POST/PUT/PATCH/DELETE は、Originが自分のHostと同じときだけ通る(Originを付けないcurlやテストは通る)。
 - **`/ws/hud`**: ハンドシェイクのHost・Originを同じ基準で検査する。
 
-これは**認証ではない**。複数人で使う場合は、実行できる人を限る認証と役割が別に要る。
+上の 3 つは**認証ではない**。複数人で使うときは、下の「認証と役割」を有効にする。
+
+### 認証と役割
+
+既定は**認証なし**(`VLM_AUTH=off`)。複数人で使うときは `VLM_AUTH=required` にする。`required` で**ユーザーが 1 人もいなければ起動しない**(設定ミスで素通しにしない)。
+
+| 役割 | できること |
+|---|---|
+| `viewer` | 見る(状態・履歴・観測・`/ws/hud`) |
+| `operator` | viewer + ゴールの分解、**実行の開始・停止**(端末へ実際にキー入力・クリックを送る) |
+| `admin` | operator + スキルの追加・削除、入力バックエンド(HID)の変更 |
+
+```bash
+python -m vlm_auto_replay.gui.auth add --name alice --role admin     # API キーは 1 度だけ表示される
+python -m vlm_auto_replay.gui.auth add --name bob --role viewer --email bob@example.com --no-key   # Cloudflare Access だけで使う人
+python -m vlm_auto_replay.gui.auth list
+python -m vlm_auto_replay.gui.auth remove --name alice
+VLM_AUTH=required python -m vlm_auto_replay.gui
+```
+
+- キーは**ハッシュだけ**を `~/.vlm_auto_replay/auth_users.json`(`VLM_AUTH_FILE` で変更)に保存する。比較は定数時間。
+- **API クライアント**: `X-API-Key: <キー>`(または `Authorization: Bearer <キー>`)。**ブラウザ GUI**: 401 のときにログイン画面が出て、API キーは HttpOnly・SameSite=Strict のクッキーになる(`/ws/hud` のハンドシェイクにも付く)。
+- **Cloudflare Access**: `VLM_CF_ACCESS_TEAM_DOMAIN`・`VLM_CF_ACCESS_AUD` を設定すると `Cf-Access-Jwt-Assertion` の JWT も使える(RS256 だけ・署名/発行者/宛先/期限を必須)。**ユーザーは自動作成しない**: `--email` で登録していない人は 403。
+- 依存: `pyjwt[crypto]`(`pip install -e ".[gui]"` に含まれる)。
+- 権限の判断は**常にサーバー側**。静的な画面(HTML・JS)自体は公開で、データは `/api/*` だけにある。
 
 ## モデル・HIDバックエンドの差し替え
 
