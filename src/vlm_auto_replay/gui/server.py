@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 
 from ..prompts.model_client import configure_model_client, get_model_client
 from .demo import DemoModelClient
-from . import auth, auth_routes
+from . import audit, auth, auth_routes
 from .observation_render import render_observation_svg
 from .runtime import RuntimeState
 from .security import install_request_guard, websocket_allowed
@@ -48,6 +48,8 @@ async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
 app = FastAPI(title="VLMAutoReplayTool Control Panel", lifespan=_lifespan)
 # 認証の無いローカル GUI(実際に入力操作を起動できる)を、別サイトのページ(CSRF)や DNS rebinding から守る
 install_request_guard(app)
+# 監査ログ(gui/audit.py): 変更系と、認証・権限の失敗を記録する。ガードの外側に入れて、ガードの 403 も残す
+audit.install_audit(app)
 # 認証と役割(gui/auth.py)。既定は off(従来どおり)。VLM_AUTH=required で、/api/* は viewer 以上を要求する。
 # 実行の開始・停止は operator、スキルの変更と入力バックエンド(HID)の変更は admin。/api/auth/* は認証なし。
 app.include_router(auth_routes.router)
@@ -174,10 +176,14 @@ async def ws_hud(websocket: WebSocket) -> None:
     # ブラウザは WebSocket に同一オリジン制限をかけない。別サイトのページが観測を購読できないよう、
     # ハンドシェイクの Host / Origin を検査する(ミドルウェアは WebSocket を通らない)。
     if not websocket_allowed(websocket.headers):
+        audit.record("denied", path="/ws/hud", status=1008, ip=websocket.client.host if websocket.client else None,
+                     detail="host/origin")
         await websocket.close(code=1008)
         return
     # 認証(VLM_AUTH=required のとき viewer 以上)。ハンドシェイクのヘッダーかクッキーで確認する。
     if auth.principal_for_websocket(websocket, "viewer") is None:
+        audit.record("denied", path="/ws/hud", status=1008, ip=websocket.client.host if websocket.client else None,
+                     detail="auth")
         await websocket.close(code=1008)
         return
     await state.hud.register(websocket)

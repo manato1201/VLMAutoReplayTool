@@ -52,3 +52,9 @@ def client(monkeypatch):
 def _allow_testserver_host(monkeypatch):
     """TestClient は Host: testserver で送る。Host の許可リスト(gui/security.py)に足しておく。"""
     monkeypatch.setenv("VLM_ALLOWED_HOSTS", "testserver")
+
+
+@pytest.fixture(autouse=True)
+def _isolate_audit_log(tmp_path, monkeypatch):
+    """監査ログ(gui/audit.py)を、テストごとの一時ファイルに向ける(本物の ~/.vlm_auto_replay/audit.jsonl に書かない)。"""
+    monkeypatch.setenv("VLM_AUDIT_LOG", str(tmp_path / "audit.jsonl"))

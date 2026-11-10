@@ -79,11 +79,48 @@
     return res;
   };
 
+  // ---- 役割に足りない操作は、押せなくして理由を出す。権限の判断はサーバー側(403)で、これは表示だけ。
+  // 一覧のボタンなど、app.js が後から作る要素にも効くよう、DOM の変化を見て当て直す。
+  const RANK = { viewer: 0, operator: 1, admin: 2 };
+  const GATES = [
+    ["#goal-input, #decompose-btn, #stop-btn, #stall-demo-checkbox, #todo-list button", "operator"],
+    ["#skill-game-title, #skill-procedural-text, #add-skill-btn, #skill-list button", "admin"],
+    ["#hid-backend-options input, #hid-backend-options button, #hid-backend-options select", "admin"],
+  ];
+
+  function applyGates(role) {
+    for (const [selector, minimum] of GATES) {
+      if (RANK[role] >= RANK[minimum]) continue;
+      for (const node of document.querySelectorAll(selector)) {
+        if (!node.disabled) node.disabled = true; // すでに無効なら触らない(監視の無限ループを避ける)
+        const text = `この操作には ${minimum} 以上の権限が必要です`;
+        if (node.title !== text) node.title = text;
+      }
+    }
+  }
+
+  function gateByRole(role) {
+    if (!(role in RANK) || role === "admin") return;
+    let scheduled = false;
+    const run = () => {
+      scheduled = false;
+      applyGates(role);
+    };
+    new MutationObserver(() => {
+      if (!scheduled) {
+        scheduled = true;
+        setTimeout(run, 0); // requestAnimationFrame は、見えていないタブでは止まるので使わない
+      }
+    }).observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["disabled"] });
+    run();
+  }
+
   // required で入っているときだけ、誰で入っているか(と、ログアウト)を右上に出す。
   nativeFetch("/api/auth/me")
     .then((r) => r.json())
     .then((me) => {
       if (me.mode !== "required" || !me.authenticated) return;
+      gateByRole(me.role);
       const logout = el("button", { type: "button", className: "btn-primary", textContent: "ログアウト" });
       logout.addEventListener("click", async () => {
         await nativeFetch("/api/auth/logout", { method: "POST" });

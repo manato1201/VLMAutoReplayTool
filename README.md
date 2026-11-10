@@ -114,6 +114,8 @@ VLM_AUTH=required python -m vlm_auto_replay.gui
 - キーは**ハッシュだけ**を `~/.vlm_auto_replay/auth_users.json`(`VLM_AUTH_FILE` で変更)に保存する。比較は定数時間。
 - **API クライアント**: `X-API-Key: <キー>`(または `Authorization: Bearer <キー>`)。**ブラウザ GUI**: 401 のときにログイン画面が出て、API キーは HttpOnly・SameSite=Strict のクッキーになる(`/ws/hud` のハンドシェイクにも付く)。
 - **Cloudflare Access**: `VLM_CF_ACCESS_TEAM_DOMAIN`・`VLM_CF_ACCESS_AUD` を設定すると `Cf-Access-Jwt-Assertion` の JWT も使える(RS256 だけ・署名/発行者/宛先/期限を必須)。**ユーザーは自動作成しない**: `--email` で登録していない人は 403。
+- **画面の出し分け**: 役割に足りない操作(ゴール分解・実行の開始・停止=operator、スキルの追加・削除・入力バックエンドの変更=admin)は、入力・ボタンが無効になり、必要な権限が表示される。**表示だけで、権限の判断は常にサーバー**。
+- **監査ログ**(`VLM_AUDIT_LOG`。既定 `~/.vlm_auto_replay/audit.jsonl`・JSON Lines): **変更系**と、**拒否(401・403・`/ws/hud` の拒否)**、ログイン・ログアウトを、時刻・名前・役割・方式・メソッド・パス・結果・IP で残す。**本文・API キー・クッキー・クエリ文字列は記録しない**。読み取りは記録しない。admin だけ `GET /api/auth/audit?limit=100`。
 - 依存: `pyjwt[crypto]`(`pip install -e ".[gui]"` に含まれる)。
 - 権限の判断は**常にサーバー側**。静的な画面(HTML・JS)自体は公開で、データは `/api/*` だけにある。
 
