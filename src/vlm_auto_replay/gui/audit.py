@@ -26,7 +26,7 @@ AUDIT_ENV = "VLM_AUDIT_LOG"
 DEFAULT_AUDIT_LOG = Path.home() / ".vlm_auto_replay" / "audit.jsonl"
 MAX_BYTES = 5 * 1024 * 1024
 UNSAFE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
-DEBUG_PAGES = frozenset({"/hud.html", "/hud.js"})  # 開発者・デバッグ向け(server.py の auth.debug)
+PROTECTED_PAGES = frozenset({"/hud.html", "/hud.js", "/admin.html", "/admin.js"})  # 開発者向け(auth.debug)・管理者向け(auth.admin)のページ(server.py)
 NOT_LOGGED_PATHS = frozenset({"/api/health"})
 SELF_LOGGED_PATHS = frozenset({"/api/auth/login", "/api/auth/logout"})
 
@@ -96,8 +96,8 @@ def install_audit(app: FastAPI) -> None:
     async def audit_middleware(request: Request, call_next):
         response = await call_next(request)
         path = request.url.path
-        # /api/* のほか、開発者・デバッグ向けのページ(監視 HUD)への拒否も記録する(許可された閲覧は、読み取りなので記録しない)
-        if (path.startswith("/api/") or path in DEBUG_PAGES) and path not in NOT_LOGGED_PATHS and not path.startswith("/api/auth/audit"):
+        # /api/* のほか、開発者向け(監視 HUD)・管理者向け(管理画面)のページへの拒否も記録する(許可された閲覧は、読み取りなので記録しない)
+        if (path.startswith("/api/") or path in PROTECTED_PAGES) and path not in NOT_LOGGED_PATHS and not path.startswith("/api/auth/audit"):
             if path in SELF_LOGGED_PATHS and response.status_code != 403:
                 return response  # ログイン・ログアウトは routers/auth.py が名前つきで記録する(ガードの 403 だけ、ここで)
             denied = response.status_code in (401, 403)

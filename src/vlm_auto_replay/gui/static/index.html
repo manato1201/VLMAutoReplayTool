@@ -46,13 +46,8 @@
 
     <section class="panel">
       <h2 class="panel-title">スキルライブラリ</h2>
-      <p class="caption">procedureスキル(非強制の手順書)をその場で追加できる。</p>
-      <div class="skill-form">
-        <input id="skill-game-title" class="text-input" type="text" placeholder="対象ゲーム名(例: MyGame)" />
-        <textarea id="skill-procedural-text" class="text-input skill-textarea" rows="3" placeholder="手順テキスト(例: 1. 敵を確認する&#10;2. 攻撃する)"></textarea>
-        <button id="add-skill-btn" class="btn-small">スキルを追加</button>
-        <span id="skill-error" class="error-text"></span>
-      </div>
+      <p class="caption">登録されているスキル(読み取り専用)。追加・削除と、入力バックエンド(HID)の設定は、管理画面(admin のみ)で行う。</p>
+      <a href="/admin.html" class="eyebrow" style="text-decoration:none;">管理画面を開く →</a>
       <div id="skill-list" class="skill-list"></div>
     </section>
 
@@ -67,17 +62,6 @@
       <p class="caption">SQLiteに永続化されるため、サーバーを再起動しても過去の実行ログを見返せる。</p>
       <div id="history-list" class="history-list"></div>
       <div id="history-detail" class="log-feed"></div>
-    </section>
-
-    <section class="panel panel-wide">
-      <h2 class="panel-title">設定: HIDバックエンド</h2>
-      <p class="caption">
-        Phase3の実HID実装(<code>actions/api_primitives.py</code>)をこの環境で実際に構築できるか確認する。
-        デモ実行(StepLog)はDemoGameの決定的スタブを使うため、ここでの選択には影響しない —
-        実運用でScreenCapture/ActionExecutorを実キャプチャに差し替えた際の設定の起点になる。
-      </p>
-      <div id="hid-backend-options" class="hid-backend-options"></div>
-      <span id="hid-backend-error" class="error-text"></span>
     </section>
   </main>
 

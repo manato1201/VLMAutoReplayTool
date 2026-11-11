@@ -84,8 +84,6 @@
   const RANK = { viewer: 0, operator: 1, admin: 2 };
   const GATES = [
     ["#goal-input, #decompose-btn, #stop-btn, #stall-demo-checkbox, #todo-list button", "operator"],
-    ["#skill-game-title, #skill-procedural-text, #add-skill-btn, #skill-list button", "admin"],
-    ["#hid-backend-options input, #hid-backend-options button, #hid-backend-options select", "admin"],
   ];
 
   function applyGates(role) {
@@ -121,6 +119,12 @@
     .then((me) => {
       if (me.mode !== "required" || !me.authenticated) return;
       gateByRole(me.role);
+      // 管理画面(スキルの追加・削除・HID の設定)は admin だけ。使えない人には入口のリンクを出さない(サーバーも 403)
+      if (me.role !== "admin") {
+        document.querySelectorAll('a[href="/admin.html"]').forEach((node) => {
+          node.hidden = true;
+        });
+      }
       // 開発者・デバッグ向け(監視 HUD)が使えない人には、入口のリンクを出さない(サーバーも同じ判断で 404 / 403)
       if (me.debug !== true) {
         document.querySelectorAll('a[href="/hud.html"]').forEach((node) => {

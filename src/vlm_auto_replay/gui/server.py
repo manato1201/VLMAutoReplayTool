@@ -215,5 +215,17 @@ def hud_script() -> FileResponse:
     return FileResponse(_STATIC_DIR / "hud.js", media_type="text/javascript")
 
 
+# 管理画面(スキルの追加・削除・HID の設定)。別のページ・別のスクリプトにして、サーバーが admin に限る。
+# viewer / operator には、この画面のコードを配らない(操作パネル本体は読み取りだけ)。
+@app.get("/admin.html", dependencies=[auth.admin], include_in_schema=False)
+def admin_page() -> FileResponse:
+    return FileResponse(_STATIC_DIR / "admin.html", media_type="text/html")
+
+
+@app.get("/admin.js", dependencies=[auth.admin], include_in_schema=False)
+def admin_script() -> FileResponse:
+    return FileResponse(_STATIC_DIR / "admin.js", media_type="text/javascript")
+
+
 # APIルートの後にマウントすることで、/api/* を優先させつつそれ以外を静的フロントエンドとして配信する。
 app.mount("/", StaticFiles(directory=_STATIC_DIR, html=True), name="static")

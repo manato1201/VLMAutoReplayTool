@@ -9,16 +9,10 @@ const stopBtn = document.getElementById("stop-btn");
 const runErrorEl = document.getElementById("run-error");
 const progressBarEl = document.getElementById("progress-bar");
 const progressLabelEl = document.getElementById("progress-label");
-const skillGameTitleEl = document.getElementById("skill-game-title");
-const skillProceduralTextEl = document.getElementById("skill-procedural-text");
-const addSkillBtn = document.getElementById("add-skill-btn");
-const skillErrorEl = document.getElementById("skill-error");
 const historyListEl = document.getElementById("history-list");
 const historyDetailEl = document.getElementById("history-detail");
 const stallDemoCheckbox = document.getElementById("stall-demo-checkbox");
 const interventionBannerEl = document.getElementById("intervention-banner");
-const hidBackendOptionsEl = document.getElementById("hid-backend-options");
-const hidBackendErrorEl = document.getElementById("hid-backend-error");
 
 async function postJson(url, body) {
   const res = await fetch(url, {
@@ -26,15 +20,6 @@ async function postJson(url, body) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body ?? {}),
   });
-  if (!res.ok) {
-    const detail = await res.json().catch(() => ({}));
-    throw new Error(detail.detail || `${url} failed: ${res.status}`);
-  }
-  return res.json();
-}
-
-async function deleteJson(url) {
-  const res = await fetch(url, { method: "DELETE" });
   if (!res.ok) {
     const detail = await res.json().catch(() => ({}));
     throw new Error(detail.detail || `${url} failed: ${res.status}`);
@@ -111,6 +96,7 @@ function renderLogs(logs, container = logFeedEl, emptyMessage = "まだ実行ロ
   }
 }
 
+// スキルライブラリ(読み取り専用)。追加・削除は管理画面(/admin.html。admin だけ)。
 function renderSkills(skills) {
   skillListEl.innerHTML = "";
   if (skills.length === 0) {
@@ -128,22 +114,7 @@ function renderSkills(skills) {
       <div class="todo-done">type=${skill.type} / createdBy=${skill.createdBy}</div>
       <pre class="skill-procedural-text">${escapeHtml(proceduralText || "")}</pre>
     `;
-
-    const deleteBtn = document.createElement("button");
-    deleteBtn.className = "btn-delete";
-    deleteBtn.textContent = "削除";
-    deleteBtn.onclick = async () => {
-      skillErrorEl.textContent = "";
-      try {
-        await deleteJson(`/api/skills/${encodeURIComponent(skill.skillId)}`);
-        await refresh();
-      } catch (e) {
-        skillErrorEl.textContent = e.message;
-      }
-    };
-
     card.appendChild(info);
-    card.appendChild(deleteBtn);
     skillListEl.appendChild(card);
   }
 }
@@ -181,39 +152,6 @@ function renderHistory(runs) {
     entry.appendChild(viewBtn);
     historyListEl.appendChild(entry);
   }
-}
-
-function renderHidBackendOptions(hidBackend) {
-  hidBackendOptionsEl.innerHTML = "";
-  for (const option of hidBackend.options) {
-    const label = document.createElement("label");
-    label.className = "hid-backend-option" + (option.name === hidBackend.current ? " selected" : "");
-
-    const radio = document.createElement("input");
-    radio.type = "radio";
-    radio.name = "hid-backend";
-    radio.value = option.name;
-    radio.checked = option.name === hidBackend.current;
-    radio.onchange = async () => {
-      hidBackendErrorEl.textContent = "";
-      try {
-        await postJson("/api/settings/hid-backend", { name: option.name });
-        await refresh();
-      } catch (e) {
-        hidBackendErrorEl.textContent = e.message;
-        await refresh(); // 失敗時も現在の選択状態(ラジオ)を最新化する
-      }
-    };
-
-    const text = document.createElement("span");
-    text.className = "todo-desc";
-    text.textContent = option.label;
-
-    label.appendChild(radio);
-    label.appendChild(text);
-    hidBackendOptionsEl.appendChild(label);
-  }
-  hidBackendErrorEl.textContent = hidBackend.error || "";
 }
 
 function escapeHtml(value) {
@@ -258,9 +196,6 @@ async function refresh() {
   const history = await historyRes.json();
   renderHistory(history.runs);
 
-  const settingsRes = await fetch("/api/settings");
-  const settings = await settingsRes.json();
-  renderHidBackendOptions(settings.hidBackend);
 }
 
 decomposeBtn.onclick = async () => {
@@ -277,26 +212,6 @@ decomposeBtn.onclick = async () => {
 
 stopBtn.onclick = async () => {
   await postJson("/api/run/stop", {});
-};
-
-addSkillBtn.onclick = async () => {
-  const proceduralText = skillProceduralTextEl.value.trim();
-  if (!proceduralText) {
-    skillErrorEl.textContent = "手順テキストを入力してください。";
-    return;
-  }
-  skillErrorEl.textContent = "";
-  try {
-    await postJson("/api/skills", {
-      gameTitle: skillGameTitleEl.value.trim() || "MyGame",
-      proceduralText,
-    });
-    skillGameTitleEl.value = "";
-    skillProceduralTextEl.value = "";
-    await refresh();
-  } catch (e) {
-    skillErrorEl.textContent = e.message;
-  }
 };
 
 refresh();
