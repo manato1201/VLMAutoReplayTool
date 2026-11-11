@@ -74,7 +74,8 @@ def test_login_logout_recorded_once_with_the_name(keys, client):
         ("login_failed", "anonymous", 401), ("login", "viewer", 200), ("logout", "viewer", 204)]
 
 
-def test_websocket_refusals_are_recorded(keys, client):
+def test_websocket_refusals_are_recorded(keys, client, monkeypatch):
+    monkeypatch.setenv(auth.DEBUG_ENV, "1")  # 無効のままだと理由は debug-disabled(test_gui_debug_gate.py)。ここは auth と host/origin
     with pytest.raises(WebSocketDisconnect):
         with client.websocket_connect("/ws/hud", headers=LOCAL):
             pass

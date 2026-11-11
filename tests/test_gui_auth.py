@@ -96,9 +96,12 @@ def test_bearer_header_is_accepted(keys, client):
 
 
 # ── ログイン(クッキー)と WebSocket ──────────────────────────────────────────────
-def test_login_cookie_works_for_http_and_websocket(keys, client):
-    r = client.post("/api/auth/login", json={"api_key": keys["operator"]}, headers=LOCAL)
-    assert r.status_code == 200 and r.json()["role"] == "operator"
+def test_login_cookie_works_for_http_and_websocket(keys, client, monkeypatch):
+    # 監視 HUD(/ws/hud)は開発者・デバッグ向け: 本番では VLM_DEBUG=1 で有効にして、admin だけ(test_gui_debug_gate.py)。
+    # ここは、クッキーが WebSocket のハンドシェイクにも付くこと(仕組み)を確かめる
+    monkeypatch.setenv(auth.DEBUG_ENV, "1")
+    r = client.post("/api/auth/login", json={"api_key": keys["admin"]}, headers=LOCAL)
+    assert r.status_code == 200 and r.json()["role"] == "admin"
     cookie = r.headers["set-cookie"].lower()
     assert "httponly" in cookie and "samesite=strict" in cookie
     assert client.get("/api/status", headers=LOCAL).status_code == 200  # ヘッダー無し(クッキーだけ)
@@ -114,9 +117,13 @@ def test_websocket_without_credentials_is_refused(keys, client):
             pass
 
 
-def test_websocket_with_api_key_header_is_accepted(keys, client):
-    with client.websocket_connect("/ws/hud", headers=h(keys["viewer"])):
+def test_websocket_with_api_key_header_is_accepted(keys, client, monkeypatch):
+    monkeypatch.setenv(auth.DEBUG_ENV, "1")  # HUD は本番では既定で無効・有効でも admin だけ
+    with client.websocket_connect("/ws/hud", headers=h(keys["admin"])):
         pass
+    with pytest.raises(WebSocketDisconnect):  # viewer は、有効でも入れない
+        with client.websocket_connect("/ws/hud", headers=h(keys["viewer"])):
+            pass
 
 
 def test_login_with_wrong_key_is_401(keys, client):

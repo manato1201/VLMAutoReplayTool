@@ -48,6 +48,7 @@ AUTH_ENV = "VLM_AUTH"
 AUTH_FILE_ENV = "VLM_AUTH_FILE"
 TEAM_DOMAIN_ENV = "VLM_CF_ACCESS_TEAM_DOMAIN"
 AUD_ENV = "VLM_CF_ACCESS_AUD"
+DEBUG_ENV = "VLM_DEBUG"
 
 ROLES = ("viewer", "operator", "admin")
 COOKIE_NAME = "vlm_key"
@@ -284,6 +285,37 @@ def require_role(minimum: str):
 viewer = Depends(require_role("viewer"))
 operator = Depends(require_role("operator"))
 admin = Depends(require_role("admin"))
+
+
+# ── 開発者・デバッグ向け(監視 HUD: /hud.html・/hud.js・/ws/hud)────────────────────────────
+# 本番(VLM_AUTH=required)では既定で無効(ログインしている人には 404。存在しない扱い)。VLM_DEBUG=1 で有効にしても admin だけ。
+# off(ローカルの単独利用)では従来どおり使える。
+def debug_enabled() -> bool:
+    return os.environ.get(DEBUG_ENV, "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def debug_minimum_role() -> str:
+    """デバッグ向けの機能に要る役割。off では viewer(従来どおり)、required では admin。"""
+    return "admin" if auth_mode() == "required" else "viewer"
+
+
+def debug_available(role: str | None) -> bool:
+    """この役割の人に使えるか(GUI が出し分けるための表示用。判断はサーバー側)。"""
+    if auth_mode() == "off":
+        return True
+    return debug_enabled() and role_rank(role or "") >= role_rank("admin")
+
+
+_require_admin = require_role("admin")
+
+
+def require_debug(request: HTTPConnection) -> Principal:
+    if auth_mode() == "required" and not debug_enabled():
+        raise HTTPException(404, "Not Found")
+    return _require_admin(request)  # off のときは ANONYMOUS(admin 扱い)で通る
+
+
+debug = Depends(require_debug)
 
 
 def principal_for_websocket(websocket: HTTPConnection, minimum: str = "viewer") -> Principal | None:

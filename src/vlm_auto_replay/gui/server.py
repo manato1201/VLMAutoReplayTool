@@ -9,6 +9,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Response, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -180,8 +181,14 @@ async def ws_hud(websocket: WebSocket) -> None:
                      detail="host/origin")
         await websocket.close(code=1008)
         return
-    # 認証(VLM_AUTH=required のとき viewer 以上)。ハンドシェイクのヘッダーかクッキーで確認する。
-    if auth.principal_for_websocket(websocket, "viewer") is None:
+    # 監視 HUD は開発者・デバッグ向け。本番(VLM_AUTH=required)では既定で無効(VLM_DEBUG=1 で有効にしても admin だけ)。
+    if auth.auth_mode() == "required" and not auth.debug_enabled():
+        audit.record("denied", path="/ws/hud", status=1008, ip=websocket.client.host if websocket.client else None,
+                     detail="debug-disabled")
+        await websocket.close(code=1008)
+        return
+    # 認証(off のとき従来どおり viewer 以上 / required のとき admin)。ハンドシェイクのヘッダーかクッキーで確認する。
+    if auth.principal_for_websocket(websocket, auth.debug_minimum_role()) is None:
         audit.record("denied", path="/ws/hud", status=1008, ip=websocket.client.host if websocket.client else None,
                      detail="auth")
         await websocket.close(code=1008)
@@ -194,6 +201,18 @@ async def ws_hud(websocket: WebSocket) -> None:
         pass
     finally:
         state.hud.unregister(websocket)
+
+
+# 監視 HUD のページとスクリプトは、静的配信より先に、デバッグ向けの入口(auth.debug)を通す。
+# 本番では既定で無効(404)・有効でも admin だけ。off(ローカル)では従来どおり。
+@app.get("/hud.html", dependencies=[auth.debug], include_in_schema=False)
+def hud_page() -> FileResponse:
+    return FileResponse(_STATIC_DIR / "hud.html", media_type="text/html")
+
+
+@app.get("/hud.js", dependencies=[auth.debug], include_in_schema=False)
+def hud_script() -> FileResponse:
+    return FileResponse(_STATIC_DIR / "hud.js", media_type="text/javascript")
 
 
 # APIルートの後にマウントすることで、/api/* を優先させつつそれ以外を静的フロントエンドとして配信する。

@@ -121,6 +121,12 @@
     .then((me) => {
       if (me.mode !== "required" || !me.authenticated) return;
       gateByRole(me.role);
+      // 開発者・デバッグ向け(監視 HUD)が使えない人には、入口のリンクを出さない(サーバーも同じ判断で 404 / 403)
+      if (me.debug !== true) {
+        document.querySelectorAll('a[href="/hud.html"]').forEach((node) => {
+          node.hidden = true;
+        });
+      }
       const logout = el("button", { type: "button", className: "btn-primary", textContent: "ログアウト" });
       logout.addEventListener("click", async () => {
         await nativeFetch("/api/auth/logout", { method: "POST" });

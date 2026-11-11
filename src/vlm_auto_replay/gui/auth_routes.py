@@ -15,9 +15,10 @@ class LoginRequest(BaseModel):
 
 def _me(mode: str, principal: auth.Principal | None) -> dict:
     if principal is None:
-        return {"mode": mode, "authenticated": False, "name": None, "role": None, "source": None}
+        return {"mode": mode, "authenticated": False, "name": None, "role": None, "source": None, "debug": False}
+    # debug: 開発者・デバッグ向け(監視 HUD)が、この人に使えるか。GUI の出し分け用(判断はサーバー側)
     return {"mode": mode, "authenticated": True, "name": principal.name, "role": principal.role,
-            "source": principal.source}
+            "source": principal.source, "debug": auth.debug_available(principal.role)}
 
 
 @router.get("/me")
