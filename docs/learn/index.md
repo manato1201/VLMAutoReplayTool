@@ -10,6 +10,7 @@
 | 4 | [拡張のレシピ](04-extend.md) | 入力・スキル・モデル・Watchdog の規則・RAG を**足したい** |
 | 5 | [テストの書き方と実行](05-testing.md) | テストを回す・偽のモデルと偽のゲーム・文書の検査 |
 | 6 | [トラブルと保守](06-troubleshooting-maintenance.md) | 403・「GUI で実機が動かない」・既知の問題・定期の保守 |
+| 7 | [基礎の補強](07-foundations.md) | 型ヒント・pydantic・Protocol・設計思想・アルゴリズム・IT 用語を**補強したい** |
 | – | [用語集](glossary.md) | 分からない言葉が出た |
 
 ## 最初の 15 分
