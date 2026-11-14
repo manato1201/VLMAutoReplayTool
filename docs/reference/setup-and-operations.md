@@ -1,0 +1,146 @@
+# セットアップ・動作確認・認証の詳細(旧 README より移動)
+
+> README を入口に絞るため、旧 README の内容を、そのまま移した(相対リンクだけ、この場所に合わせて直した)。**テスト件数などの数字は、書かれた時点のまま**で、今の件数は `pytest` で確かめる。入口は [README](../../README.md)・学習資料は [学習資料](../learn/index.md)。
+
+# VLMAutoReplayTool
+
+「基盤モデルによる計画」と「専用モデル・スキル・APIによる実行」を分離したゲーム自動プレイエージェントのコア骨格実装。設計は [`VLMAutoReplayTool_DESIGN.md`](../../VLMAutoReplayTool_DESIGN.md) を参照。`VLMAutoReplayTool_UI_DESIGN.md` はSentri風の汎用デザイントークン集で、本ツール固有の画面仕様は未定義のため、GUIダッシュボードの配色・タイポグラフィのみに適用している。
+
+**技術ドキュメント**: 各Phaseのアーキテクチャ図・シーケンス図(Mermaid)付きの詳細な技術解説書を用意している。
+- [`docs/TECHNICAL_OVERVIEW.md`](../TECHNICAL_OVERVIEW.md) — Markdown版(GitHub上でMermaid図がそのまま描画される)
+- [`docs/technical-overview.html`](../technical-overview.html) — HTML版(ブラウザで開くとSentri風デザインで閲覧できる。`mermaid.js`をCDNから読み込むためオンライン環境推奨)
+
+### アーキテクチャ概観
+
+```mermaid
+%%{init: {"theme":"base","fontFamily":"Noto Sans JP, Hiragino Sans, Meiryo, sans-serif","themeVariables":{"fontFamily":"Noto Sans JP, Hiragino Sans, Meiryo, sans-serif","primaryColor":"#ffffff","primaryBorderColor":"#d0d5dd","primaryTextColor":"#101828","lineColor":"#667085","clusterBkg":"#f2f4f7","clusterBorder":"#d0d5dd","edgeLabelBackground":"#ffffff"},"flowchart":{"wrappingWidth":480,"nodeSpacing":40,"rankSpacing":56,"padding":14},"sequence":{"mirrorActors":false,"wrap":false,"width":150,"actorMargin":30,"messageMargin":34}}}%%
+flowchart LR
+    FM["基盤モデル\n(prompts/ 9関数)"] --> ML["MainLoop\n(loop/)"]
+    ML --> WD["Watchdog\n(loop/watchdog.py)"]
+    WD -->|"再構築"| FM
+    ML --> AC["Skill/API実行層\n(actions/)"]
+    RAG["RAG :8766\n(knowledge/)"] -->|"TODO生成時のみ"| FM
+    GUI["Webダッシュボード\n(gui/)"] --> ML
+```
+
+## 実装範囲(今回のスコープ)
+
+設計書のPhase0〜7のうち、**Phase1〜5をフル実装**し、実データフローが通る状態にした。Phase6/7(スキル自動抽出・視覚的自己位置推定)は設計書自身が「複数回反復が前提」と明記しているR&D領域のため、実データで動く軽量な実装+反復ポイントをTODOコメントで明示する形にとどめている。
+
+| Phase | 内容 | 実装状態 |
+|---|---|---|
+| Phase1 | プロンプトテンプレート層(9関数) | `src/vlm_auto_replay/prompts/` フル実装 |
+| Phase2 | メインループ+StepLog | `src/vlm_auto_replay/loop/main_loop.py` フル実装 |
+| Phase3 | Action実行層(Skill/API+HID) | `src/vlm_auto_replay/actions/` フル実装(ViGEm/SendInputは実装済みだが実機ドライバ依存) |
+| Phase4 | 知識ソース+RAG(TODO生成時限定) | `src/vlm_auto_replay/knowledge/` フル実装 |
+| Phase5 | Watchdog+TODO再構築 | `src/vlm_auto_replay/loop/watchdog.py` フル実装 |
+| Phase6 | スキル自動抽出 | `src/vlm_auto_replay/skills/` 軽量実装(TODOコメントあり) |
+| Phase7 | ナビゲーション推論 | `src/vlm_auto_replay/navigation/` 軽量実装(TODOコメントあり) |
+| Phase8 | モニタリングHUD(UI/アニメーション強化) | `src/vlm_auto_replay/gui/hud_broadcast.py` + `gui/static/hud.{html,js}` フル実装 |
+
+## 動作確認手順(クイックスタート)
+
+初めて動かす場合は上から順に実行すれば良い。すべてWindows PowerShell/Git Bash想定、リポジトリ直下で実行する。
+
+**1. 仮想環境を作り、依存関係(テスト+GUI)をインストールする**
+
+```bash
+python -m venv .venv
+.venv/Scripts/pip install -e ".[dev,gui]"
+```
+
+**2. 自動テスト(40件)を実行し、コアエンジンが正しく動くことを確認する**
+
+```bash
+.venv/Scripts/pytest -q
+```
+
+`68 passed` と表示されれば、Phase1〜8のコアロジック(型付きプロンプト関数・メインループ・Skill/API実行・RAG境界・Watchdog・スキル抽出・ナビゲーション)とGUI(FastAPIエンドポイント+SQLite永続化+HUD WebSocket配信)がすべて正常。
+
+**3. GUIサーバを起動する**
+
+```bash
+.venv/Scripts/python -m vlm_auto_replay.gui
+```
+
+`Uvicorn running on http://127.0.0.1:8765` と表示されたら起動完了(終了するには実行中のターミナルで `Ctrl+C`)。
+
+**4. ブラウザで `http://127.0.0.1:8765` を開き、実際に操作する**
+
+1. 「ゴール分解」欄に適当な目標(例: `ボスを撃破する`)を入力して **分解する** をクリック → 3件のTODOカードが表示される
+2. 好きなTODOカードの **実行開始** をクリック → プログレスバーが進み、数秒おきにStepLog(サムネイル・reasoning・action・result)がライブで積み上がっていくのが見える
+3. ヘッダー右上のSTATUSが `RUNNING` → `DONE` に変わることを確認する
+4. 実行中に **停止** ボタンを押すと、その場でSTATUSが `STOPPED` になることを確認する(Watchdogの停止経路の確認)
+5. 「スキルライブラリ」パネルに `demo-skill-1`(procedureスキル)が表示されていることを確認する。ゲーム名+手順テキストを入力して **スキルを追加** すると即座に一覧へ反映され、**削除** で取り除けることも確認する
+6. 「実行履歴」パネルに今実行したRunが表示され、**ログを見る** をクリックするとそのRunのStepLog一覧が下に表示されることを確認する
+7. サーバーをいったん `Ctrl+C` で止めて再度 `python -m vlm_auto_replay.gui` すると、追加したスキルと実行履歴が消えずに残っていることを確認する(`~/.vlm_auto_replay/gui.sqlite3` にSQLiteで永続化されている)
+8. 別のTODOで「🐢 Watchdog介入をデモする」にチェックを入れてから **実行開始** をクリックすると、意図的に完了しないゲームに対してWatchdogが8ステップで自動介入し、STATUSが `INTERVENED` になる。Watchdogパネルに介入理由のバナーが表示され、「ゴール分解」パネルのTODOリストが自動で再構築された新しいTODOに置き換わることを確認する
+9. 「設定: HIDバックエンド」パネルで `SendInput` を選ぶと、この環境で実際にPhase3のHID実装が構築できることを確認できる(Windows上ではctypesのみで構築でき、クリックしても実際にキー入力やマウス移動は発生しない)。`ViGEm` を選ぶと、`vgamepad`パッケージ未インストールの場合は「vgamepad が未インストールです」という明確なエラーが表示され、選択は直前の状態のまま変わらないことを確認する
+10. ヘッダーの **HUDを開く →** から `http://127.0.0.1:8765/hud.html` を開く(操作パネルとは別ページ)。WSステータスが「接続済み」になったら、操作パネル側でTODOを実行開始する → HUD側にリアルタイムでドットチャート(StepLogビュー)・フォーカスリング(TODOビュー)・ラジアルプログレスが反映されることを確認する。「🐢 Watchdog介入をデモする」付きで実行すると、介入したステップのドットが赤くなり、右下にスタックトーストが出ることも確認する
+
+実VLM・実HID(ViGEm/SendInput)を使わない**デモモード**で動くため、APIキーやドライバのセットアップなしにこの一連の流れを確認できる。実モデル/実HIDへの差し替え方は次項参照。
+
+**5.(任意)Windows実機でのHID制御を使う場合**
+
+```bash
+.venv/Scripts/pip install -e ".[hid]"
+```
+
+(別途 [ViGEmBus](https://github.com/ViGEm/ViGEmBus) ドライバのインストールが必要)
+
+## セキュリティ(操作GUI)
+
+GUIは既定では認証を持たず、`127.0.0.1` だけで待ち受ける。ただし `POST /api/run/start` は実際にキー入力・クリックを起動するため、ブラウザで開いた別サイトのページから叩かれないよう、次を検査する(`gui/security.py`)。
+
+- **Hostの許可リスト**: 既定はループバックのみ(DNS rebinding対策)。別のホスト名で開くときは環境変数 `VLM_ALLOWED_HOSTS`(カンマ区切り)に足す。
+- **変更操作のOrigin**: POST/PUT/PATCH/DELETE は、Originが自分のHostと同じときだけ通る(Originを付けないcurlやテストは通る)。
+- **`/ws/hud`**: ハンドシェイクのHost・Originを同じ基準で検査する。
+
+上の 3 つは**認証ではない**。複数人で使うときは、下の「認証と役割」を有効にする。
+
+### 認証と役割
+
+既定は**認証なし**(`VLM_AUTH=off`)。複数人で使うときは `VLM_AUTH=required` にする。`required` で**ユーザーが 1 人もいなければ起動しない**(設定ミスで素通しにしない)。
+
+| 役割 | できること |
+|---|---|
+| `viewer` | 見る(状態・履歴・観測・`/ws/hud`) |
+| `operator` | viewer + ゴールの分解、**実行の開始・停止**(端末へ実際にキー入力・クリックを送る) |
+| `admin` | operator + スキルの追加・削除、入力バックエンド(HID)の変更 |
+
+```bash
+python -m vlm_auto_replay.gui.auth add --name alice --role admin     # API キーは 1 度だけ表示される
+python -m vlm_auto_replay.gui.auth add --name bob --role viewer --email bob@example.com --no-key   # Cloudflare Access だけで使う人
+python -m vlm_auto_replay.gui.auth list
+python -m vlm_auto_replay.gui.auth remove --name alice
+VLM_AUTH=required python -m vlm_auto_replay.gui
+```
+
+- キーは**ハッシュだけ**を `~/.vlm_auto_replay/auth_users.json`(`VLM_AUTH_FILE` で変更)に保存する。比較は定数時間。
+- **API クライアント**: `X-API-Key: <キー>`(または `Authorization: Bearer <キー>`)。**ブラウザ GUI**: 401 のときにログイン画面が出て、API キーは HttpOnly・SameSite=Strict のクッキーになる(`/ws/hud` のハンドシェイクにも付く)。
+- **Cloudflare Access**: `VLM_CF_ACCESS_TEAM_DOMAIN`・`VLM_CF_ACCESS_AUD` を設定すると `Cf-Access-Jwt-Assertion` の JWT も使える(RS256 だけ・署名/発行者/宛先/期限を必須)。**ユーザーは自動作成しない**: `--email` で登録していない人は 403。
+- **画面の出し分け**: 役割に足りない操作(ゴール分解・実行の開始・停止=operator、スキルの追加・削除・入力バックエンドの変更=admin)は、入力・ボタンが無効になり、必要な権限が表示される。**表示だけで、権限の判断は常にサーバー**。
+- **開発者・デバッグ向け(監視 HUD)**: `/hud.html`・`/hud.js`・`/ws/hud` は、**本番(`VLM_AUTH=required`)では既定で無効**(ログインしている人には 404、WebSocket は 1008 で閉じる)。`VLM_DEBUG=1` で有効にしても **admin だけ**。`off`(ローカルの単独利用)では従来どおり。操作パネルが使う `/api/observation/*` は利用者向けなので影響しない。操作パネルの「HUDを開く」リンクは、使えない人には出ない(サーバーも同じ判断で拒否する)。拒否は監査ログに残る。
+- **監査ログ**(`VLM_AUDIT_LOG`。既定 `~/.vlm_auto_replay/audit.jsonl`・JSON Lines): **変更系**と、**拒否(401・403・`/ws/hud` の拒否)**、ログイン・ログアウトを、時刻・名前・役割・方式・メソッド・パス・結果・IP で残す。**本文・API キー・クッキー・クエリ文字列は記録しない**。読み取りは記録しない。admin だけ `GET /api/auth/audit?limit=100`。
+- 依存: `pyjwt[crypto]`(`pip install -e ".[gui]"` に含まれる)。
+- 権限の判断は**常にサーバー側**。静的な画面(HTML・JS)自体は公開で、データは `/api/*` だけにある。
+
+## モデル・HIDバックエンドの差し替え
+
+- 基盤モデル呼び出しは `prompts/model_client.py` の `FoundationModelClient` Protocolを実装し、`configure_model_client()` で注入する。テストでは決定的な `ScriptedFoundationModelClient` を使用している。実運用ではVLM APIをラップした実装を注入する(ベンダー名はループ本体に埋め込まない)。
+- HID実行は `actions/api_primitives.py` の `PadBackend` / `KeyboardMouseBackend` / `OcrBackend` を実装して差し替える。実機用に `ViGEmPadBackend`(ViGEm経由)・`SendInputBackend`(ctypes経由)を用意し、テスト・未接続環境向けに `NullPadBackend` 等を用意している。
+
+## ディレクトリ構成
+
+```
+src/vlm_auto_replay/
+  prompts/     Phase1 プロンプトテンプレート層
+  loop/        Phase2 メインループ+StepLog、Phase5 Watchdog
+  actions/     Phase3 Skill/API実行層+HIDプリミティブ+サンドボックス
+  knowledge/   Phase4 RAGクライアント+Experience
+  skills/      Phase6 スキル自動抽出+受け入れゲート
+  navigation/  Phase7 視覚的自己位置推定パイプライン
+  gui/         操作用Webダッシュボード(FastAPI+静的フロントエンド)、Phase8 HUD WebSocket配信
+tests/
+  fixtures/fake_game.py  Final Phase向け決定的フェイクゲーム
+```

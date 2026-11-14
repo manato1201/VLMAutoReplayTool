@@ -12,6 +12,7 @@ HTML版(同内容、ブラウザでの閲覧向け): [`technical-overview.html`]
 「計画(基盤モデル)」と「実行(専用モデル・スキル・API)」を分離したゲーム自動プレイエージェント。中核ループは `capture → generate_next_action → execute → 状態変化確認 → repeat` という単純な形を保ち、各ステップの行動理由(reasoning)を必ず記録する。
 
 ```mermaid
+%%{init: {"theme":"base","fontFamily":"Noto Sans JP, Hiragino Sans, Meiryo, sans-serif","themeVariables":{"fontFamily":"Noto Sans JP, Hiragino Sans, Meiryo, sans-serif","primaryColor":"#ffffff","primaryBorderColor":"#d0d5dd","primaryTextColor":"#101828","lineColor":"#667085","clusterBkg":"#f2f4f7","clusterBorder":"#d0d5dd","edgeLabelBackground":"#ffffff"},"flowchart":{"wrappingWidth":480,"nodeSpacing":40,"rankSpacing":56,"padding":14},"sequence":{"mirrorActors":false,"wrap":false,"width":150,"actorMargin":30,"messageMargin":34}}}%%
 flowchart TB
     subgraph Plan["計画(基盤モデル / Phase1)"]
         FM["FoundationModelClient\n(9関数: decompose_goal_to_todo, generate_next_action, ...)"]
@@ -74,6 +75,7 @@ flowchart TB
 | `src/vlm_auto_replay/gui/` | — | 操作用Webダッシュボード(FastAPI)+Phase8 HUD | フル実装(`demo.py`にDemoModelClient/DemoGame、`observation_render.py`にSVG描画を分離) |
 
 ```mermaid
+%%{init: {"theme":"base","fontFamily":"Noto Sans JP, Hiragino Sans, Meiryo, sans-serif","themeVariables":{"fontFamily":"Noto Sans JP, Hiragino Sans, Meiryo, sans-serif","primaryColor":"#ffffff","primaryBorderColor":"#d0d5dd","primaryTextColor":"#101828","lineColor":"#667085","clusterBkg":"#f2f4f7","clusterBorder":"#d0d5dd","edgeLabelBackground":"#ffffff"},"flowchart":{"wrappingWidth":480,"nodeSpacing":40,"rankSpacing":56,"padding":14},"sequence":{"mirrorActors":false,"wrap":false,"width":150,"actorMargin":30,"messageMargin":34}}}%%
 graph LR
     prompts["prompts/\n(Phase1)"] --> loop["loop/\n(Phase2,5)"]
     loop --> actions["actions/\n(Phase3)"]
@@ -96,6 +98,7 @@ graph LR
 差し替え可能性は `prompts/model_client.py` の `FoundationModelClient` Protocolで実現する。9関数はモジュールレベルの `get_model_client()` のみを経由してモデルを呼び出すため、`configure_model_client()` で実装を差し替えても **呼び出し側(MainLoop・SkillRunner・Watchdog・GUI)のコードは一切変更不要**。
 
 ```mermaid
+%%{init: {"theme":"base","fontFamily":"Noto Sans JP, Hiragino Sans, Meiryo, sans-serif","themeVariables":{"fontFamily":"Noto Sans JP, Hiragino Sans, Meiryo, sans-serif","primaryColor":"#ffffff","primaryBorderColor":"#d0d5dd","primaryTextColor":"#101828","lineColor":"#667085","clusterBkg":"#f2f4f7","clusterBorder":"#d0d5dd","edgeLabelBackground":"#ffffff"},"flowchart":{"wrappingWidth":480,"nodeSpacing":40,"rankSpacing":56,"padding":14},"sequence":{"mirrorActors":false,"wrap":false,"width":150,"actorMargin":30,"messageMargin":34}}}%%
 classDiagram
     class FoundationModelClient {
         <<Protocol>>
@@ -126,6 +129,7 @@ classDiagram
 ## 4. Phase2: MainLoop + StepLog
 
 ```mermaid
+%%{init: {"theme":"base","fontFamily":"Noto Sans JP, Hiragino Sans, Meiryo, sans-serif","themeVariables":{"fontFamily":"Noto Sans JP, Hiragino Sans, Meiryo, sans-serif","primaryColor":"#ffffff","primaryBorderColor":"#d0d5dd","primaryTextColor":"#101828","lineColor":"#667085","clusterBkg":"#f2f4f7","clusterBorder":"#d0d5dd","edgeLabelBackground":"#ffffff"},"flowchart":{"wrappingWidth":480,"nodeSpacing":40,"rankSpacing":56,"padding":14},"sequence":{"mirrorActors":false,"wrap":false,"width":150,"actorMargin":30,"messageMargin":34}}}%%
 sequenceDiagram
     participant MainLoop as MainLoop.run()
     participant Cap as ScreenCapture
@@ -166,6 +170,7 @@ sequenceDiagram
 ## 5. Phase3: Action実行層(Skill/API二層+HID)
 
 ```mermaid
+%%{init: {"theme":"base","fontFamily":"Noto Sans JP, Hiragino Sans, Meiryo, sans-serif","themeVariables":{"fontFamily":"Noto Sans JP, Hiragino Sans, Meiryo, sans-serif","primaryColor":"#ffffff","primaryBorderColor":"#d0d5dd","primaryTextColor":"#101828","lineColor":"#667085","clusterBkg":"#f2f4f7","clusterBorder":"#d0d5dd","edgeLabelBackground":"#ffffff"},"flowchart":{"wrappingWidth":480,"nodeSpacing":40,"rankSpacing":56,"padding":14},"sequence":{"mirrorActors":false,"wrap":false,"width":150,"actorMargin":30,"messageMargin":34}}}%%
 flowchart TD
     NA["NextActionOutput\n{actionType, actionId, params}"] --> DP{ActionDispatcher}
     DP -->|"actionType=='api'"| API["ApiPrimitives\npad_input/key_input/mouse_move/ocr/movement"]
@@ -190,6 +195,7 @@ flowchart TD
 ## 6. Phase4: 知識ソース+RAG(TODO生成時限定)
 
 ```mermaid
+%%{init: {"theme":"base","fontFamily":"Noto Sans JP, Hiragino Sans, Meiryo, sans-serif","themeVariables":{"fontFamily":"Noto Sans JP, Hiragino Sans, Meiryo, sans-serif","primaryColor":"#ffffff","primaryBorderColor":"#d0d5dd","primaryTextColor":"#101828","lineColor":"#667085","clusterBkg":"#f2f4f7","clusterBorder":"#d0d5dd","edgeLabelBackground":"#ffffff"},"flowchart":{"wrappingWidth":480,"nodeSpacing":40,"rankSpacing":56,"padding":14},"sequence":{"mirrorActors":false,"wrap":false,"width":150,"actorMargin":30,"messageMargin":34}}}%%
 flowchart LR
     subgraph Bridge["DevelopmentRAGEnvironment (:8766, X-API-Key)"]
         DOCS[("docs namespace\nマニュアル/wiki/攻略")]
@@ -217,6 +223,7 @@ flowchart LR
 ## 7. Phase5: Watchdog + TODO再構築
 
 ```mermaid
+%%{init: {"theme":"base","fontFamily":"Noto Sans JP, Hiragino Sans, Meiryo, sans-serif","themeVariables":{"fontFamily":"Noto Sans JP, Hiragino Sans, Meiryo, sans-serif","primaryColor":"#ffffff","primaryBorderColor":"#d0d5dd","primaryTextColor":"#101828","lineColor":"#667085","clusterBkg":"#f2f4f7","clusterBorder":"#d0d5dd","edgeLabelBackground":"#ffffff"},"flowchart":{"wrappingWidth":480,"nodeSpacing":40,"rankSpacing":56,"padding":14},"sequence":{"mirrorActors":false,"wrap":false,"width":150,"actorMargin":30,"messageMargin":34}}}%%
 flowchart TD
     Start(("should_intervene(todo, logs)")) --> C1{"同一TODOの\nステップ数 >= 閾値N?"}
     C1 -->|Yes| Rebuild["介入(True)\n強制発動"]
@@ -237,6 +244,7 @@ flowchart TD
 設計書自身が「複数回反復が前提」と明記しているR&D領域。実データで動く最小実装を提供し、反復ポイントは各ファイルに `TODO(Phase6反復)` / `TODO(Phase7反復)` として明示している。
 
 ```mermaid
+%%{init: {"theme":"base","fontFamily":"Noto Sans JP, Hiragino Sans, Meiryo, sans-serif","themeVariables":{"fontFamily":"Noto Sans JP, Hiragino Sans, Meiryo, sans-serif","primaryColor":"#ffffff","primaryBorderColor":"#d0d5dd","primaryTextColor":"#101828","lineColor":"#667085","clusterBkg":"#f2f4f7","clusterBorder":"#d0d5dd","edgeLabelBackground":"#ffffff"},"flowchart":{"wrappingWidth":480,"nodeSpacing":40,"rankSpacing":56,"padding":14},"sequence":{"mirrorActors":false,"wrap":false,"width":150,"actorMargin":30,"messageMargin":34}}}%%
 flowchart TD
     subgraph Phase6["Phase6: skills/extraction.py"]
         LOGS["candidate_logs\n(3ステップ反復フィクスチャ等)"] --> MDO["merge_duplicate_operations()"]
@@ -267,6 +275,7 @@ flowchart TD
 `src/vlm_auto_replay/gui/` はコアエンジンをブラウザから操作するためのFastAPI製ローカルWebアプリ。実VLM/実HIDの代わりに決定的な `DemoModelClient` / `DemoGame`(`runtime.py`)を既定で使用し、APIキーやドライバなしで即座に動作する。
 
 ```mermaid
+%%{init: {"theme":"base","fontFamily":"Noto Sans JP, Hiragino Sans, Meiryo, sans-serif","themeVariables":{"fontFamily":"Noto Sans JP, Hiragino Sans, Meiryo, sans-serif","primaryColor":"#ffffff","primaryBorderColor":"#d0d5dd","primaryTextColor":"#101828","lineColor":"#667085","clusterBkg":"#f2f4f7","clusterBorder":"#d0d5dd","edgeLabelBackground":"#ffffff"},"flowchart":{"wrappingWidth":480,"nodeSpacing":40,"rankSpacing":56,"padding":14},"sequence":{"mirrorActors":false,"wrap":false,"width":150,"actorMargin":30,"messageMargin":34}}}%%
 sequenceDiagram
     participant Browser
     participant API as FastAPI(server.py)
@@ -340,6 +349,7 @@ sequenceDiagram
 設計書のPhase8追記(2026-09-09)に基づく。既存スキーマ(`StepLog` / `TodoItem` / `StallDiagnosis` / `ExperienceOutput`)をHUDが読み取り専用で消費する片方向データフロー — HUDから`MainLoop`やGUIの状態への書き込みは一切存在しない。新規データモデルは作らず、既存スキーマの`model_dump()`をそのままJSONとして配信する。
 
 ```mermaid
+%%{init: {"theme":"base","fontFamily":"Noto Sans JP, Hiragino Sans, Meiryo, sans-serif","themeVariables":{"fontFamily":"Noto Sans JP, Hiragino Sans, Meiryo, sans-serif","primaryColor":"#ffffff","primaryBorderColor":"#d0d5dd","primaryTextColor":"#101828","lineColor":"#667085","clusterBkg":"#f2f4f7","clusterBorder":"#d0d5dd","edgeLabelBackground":"#ffffff"},"flowchart":{"wrappingWidth":480,"nodeSpacing":40,"rankSpacing":56,"padding":14},"sequence":{"mirrorActors":false,"wrap":false,"width":150,"actorMargin":30,"messageMargin":34}}}%%
 sequenceDiagram
     participant Browser as ブラウザ(hud.html)
     participant WS as GET/WS /ws/hud
