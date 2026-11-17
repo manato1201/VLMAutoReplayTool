@@ -146,3 +146,15 @@ def test_hud_websocket_receives_skills_event_on_add_and_remove(client):
         removed_event = ws.receive_json()
         assert removed_event["type"] == "skills"
         assert all(s["skillId"] != skill_id for s in removed_event["skills"])
+
+
+def test_hud_websocket_receives_run_finished_after_run_started(client):
+    """HUDの「いま実行中」(フォーカスリングの脈動)を止める合図が届く。"""
+    todo_id = client.post("/api/todo/decompose", json={"goal": "ボス"}).json()["todos"][0]["todoId"]
+    with client.websocket_connect("/ws/hud") as ws:
+        client.post("/api/run/start", json={"todoId": todo_id, "maxSteps": 12})
+        types = []
+        deadline = time.time() + 15
+        while time.time() < deadline and "run_finished" not in types:
+            types.append(ws.receive_json()["type"])
+    assert types[0] == "run_started" and "run_finished" in types

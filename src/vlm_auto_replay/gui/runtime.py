@@ -250,6 +250,8 @@ class RuntimeState:
                     else:
                         self.status = "stopped" if self._watchdog.stop_requested else "done"
                 final_status = self.status
+            # 「いま実行中」の表示(HUDのフォーカスリングの脈動)を止める合図。
+            self.hud.publish({"type": "run_finished", "status": final_status})
             if final_status == "intervened":
                 self._apply_watchdog_rebuild(todo, logs)
             elif final_status == "done":

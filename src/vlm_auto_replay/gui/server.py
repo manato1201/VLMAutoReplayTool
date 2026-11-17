@@ -14,6 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from ..prompts.model_client import configure_model_client, get_model_client
+from ..prompts.openai_compat_client import client_from_env
 from .demo import DemoModelClient
 from . import audit, auth, auth_routes
 from .observation_render import render_observation_svg
@@ -25,11 +26,12 @@ _STATIC_DIR = Path(__file__).parent / "static"
 
 def _ensure_model_client_configured() -> None:
     """既に実クライアントが configure_model_client() で設定済みならそれを尊重し、
-    未設定の場合のみデモ用クライアントを既定で使う。"""
+    未設定の場合のみ、環境変数 VLM_MODEL_BACKEND=openai-compat ならローカル/OpenAI互換の
+    クライアント、そうでなければデモ用クライアントを使う(設定の誤りは起動時に例外で止める)。"""
     try:
         get_model_client()
     except RuntimeError:
-        configure_model_client(DemoModelClient())
+        configure_model_client(client_from_env() or DemoModelClient())
 
 
 @asynccontextmanager

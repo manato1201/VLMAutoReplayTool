@@ -157,6 +157,14 @@ function clearStepLogState() {
 function applyEvent(event) {
   switch (event.type) {
     case "run_started":
+      document.body.classList.add("is-running");
+      clearStepLogState();
+      break;
+
+    case "run_finished":
+      document.body.classList.remove("is-running");
+      break;
+
     case "logs_reset":
       clearStepLogState();
       break;
@@ -217,6 +225,7 @@ async function hydrate(pending) {
     state.completedTodoIds = snapshot.completedTodoIds;
     state.stepLogs = snapshot.logs;
     state.skills = snapshot.skills;
+    document.body.classList.toggle("is-running", snapshot.status === "running");
     if (snapshot.logs.length > 0) {
       state.lastStepTodoId = snapshot.logs[snapshot.logs.length - 1].todoId;
     }

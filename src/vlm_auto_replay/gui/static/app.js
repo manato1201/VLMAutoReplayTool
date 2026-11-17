@@ -62,7 +62,7 @@ function renderTodos(todos, activeTodoId, status) {
 
 function renderProgress(progress, stepsToWin) {
   const ratio = stepsToWin > 0 ? Math.min(progress / stepsToWin, 1) : 0;
-  progressBarEl.style.width = `${Math.round(ratio * 100)}%`;
+  progressBarEl.style.transform = `scaleX(${ratio})`;
   progressLabelEl.textContent = `${progress} / ${stepsToWin}`;
 }
 
@@ -166,6 +166,13 @@ async function refresh() {
   const snapshot = await res.json();
 
   statusPill.textContent = `STATUS: ${snapshot.status.toUpperCase()}`;
+  if (statusPill.dataset.status !== snapshot.status) {
+    // 状態が切り替わったときだけ、1回きりの動きをやり直す(prefers-reduced-motion では CSS 側で止まる)。
+    statusPill.dataset.status = snapshot.status;
+    statusPill.classList.remove("state-change");
+    void statusPill.offsetWidth;
+    statusPill.classList.add("state-change");
+  }
   statusPill.classList.toggle("running", snapshot.status === "running");
   statusPill.classList.toggle("intervened", snapshot.status === "intervened");
   statusPill.classList.toggle("error", snapshot.status === "error");

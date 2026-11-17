@@ -11,8 +11,8 @@
 | 実装範囲 | Phase 1〜5(プロンプト層・メインループ・実行層・RAG・Watchdog)と Phase 8(HUD)は**フル実装**。Phase 6・7(スキルの自動抽出・自己位置推定)は**軽量実装**(反復が前提) |
 | テスト | `.venv/Scripts/pytest -q`(偽のモデル・偽のゲームで、全体を決定的に。文書の検査を含む) |
 | 認証 | 既定は**なし**(`VLM_AUTH=off`。Host・Origin の検査だけ)。複数人なら `VLM_AUTH=required` |
-| **GUI の実行** | **デモのゲーム・デモのモデルだけ**。実機・実モデルを GUI から動かすのは、まだ未配線 |
-| 未検証 | ViGEm・SendInput の**実機での入力**・本物の VLM での挙動とコスト |
+| **GUI の実行** | **デモのゲームだけ**(モデルは `VLM_MODEL_BACKEND=openai-compat` で OpenAI 互換サーバーに差し替え可。[下記](#ローカル-llm-につなぐopenai-互換))。実機を GUI から動かすのは、まだ未配線 |
+| 未検証 | ViGEm・SendInput の**実機での入力**・本物の VLM での挙動とコスト(OpenAI 互換クライアントも偽サーバーでしか試していない) |
 | 既知の問題 | [トラブルと保守](docs/learn/06-troubleshooting-maintenance.md)(サンドボックスは破れる・観測の画像はメモリのみ 等) |
 
 ## クイックスタート
@@ -25,6 +25,28 @@ python -m venv .venv
 ```
 
 ブラウザで開き、**ゴール分解 → 実行開始**。デモのゲームが動き、StepLog がライブで積み上がります(手順の詳細は [旧 README](docs/reference/setup-and-operations.md))。
+
+## ローカル LLM につなぐ(OpenAI 互換)
+
+Ollama・llama.cpp server・LM Studio など、`/v1/chat/completions` を話すサーバーにつなげます(`prompts/openai_compat_client.py`)。画像は `image_url`(data URI)で送ります。
+
+```bash
+# 1. サーバー側(例: Ollama。モデルは自分で用意する)
+ollama pull llava            # 例。VLM でないモデルは、画像つきの task で失敗する
+
+# 2. 単独で 1 回だけ聞く(別リポジトリからもこれを呼べる)
+export VLM_LLM_BASE_URL=http://127.0.0.1:11434/v1  VLM_LLM_MODEL=llava
+.venv/Scripts/python -m vlm_auto_replay.ask --image shot.png "この画面の状態を説明して"
+
+# 3. GUI・計画の流れで使う(デモのモデルの代わりに差し替わる)
+export VLM_MODEL_BACKEND=openai-compat
+.venv/Scripts/python -m vlm_auto_replay.gui
+```
+
+コードからは `configure_model_client(OpenAICompatClient(base_url=..., model=...))`。設定は環境変数で、`VLM_LLM_BASE_URL`・`VLM_LLM_MODEL`・`VLM_LLM_API_KEY_ENV`(**キーを入れた環境変数の名前**。値は置かない)・`VLM_LLM_TIMEOUT_SEC`(既定 120)・`VLM_LLM_MAX_RETRIES`(既定 2)・`VLM_LLM_RESPONSE_FORMAT`(`json_object`|`none`。JSON モード非対応のサーバーは `none`)。
+
+- 接続先は **127.0.0.1 / localhost の http か、https のみ**。URL に認証情報は埋め込めず、リダイレクトは追いません。エラー文に API キーは出ません。
+- **未測定**: 実モデルでの精度・速度・VRAM(テストは偽サーバーだけ)。GUI のゲーム側はデモのままなので、GUI から実モデルを使っても、観測はデモの文字列です。
 
 ## 設計の軸
 
