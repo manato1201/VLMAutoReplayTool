@@ -379,6 +379,40 @@ body {
   font-size: 14px;
 }
 
+/* エラーが出た(または別のエラーに変わった)ときの 1 回きりの横揺れ。JS が .shake を付け直す。transform だけ。 */
+.error-text.shake {
+  display: inline-block;
+  animation: error-shake 280ms ease-out 1;
+}
+
+@keyframes error-shake {
+  20% {
+    transform: translateX(-5px);
+  }
+  40% {
+    transform: translateX(4px);
+  }
+  60% {
+    transform: translateX(-3px);
+  }
+  80% {
+    transform: translateX(2px);
+  }
+}
+
+/* 新しく増えた TODO カード・StepLog の 1 行だけが、現れるときに 1 回きり下から入る(JS が .is-new を付ける。再描画では動かさない)。 */
+.is-new {
+  animation: item-enter 220ms ease-out 1 both;
+  animation-delay: calc(var(--i, 0) * 60ms);
+}
+
+@keyframes item-enter {
+  from {
+    transform: translateY(8px);
+    opacity: 0;
+  }
+}
+
 .empty-hint {
   color: var(--on-dark-muted);
   font-size: 14px;

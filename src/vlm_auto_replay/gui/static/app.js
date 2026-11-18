@@ -14,6 +14,24 @@ const historyDetailEl = document.getElementById("history-detail");
 const stallDemoCheckbox = document.getElementById("stall-demo-checkbox");
 const interventionBannerEl = document.getElementById("intervention-banner");
 
+// 1 回きりの動き(エラーの横揺れ・新しい行の入場)のための小さな部品。動きを減らす設定では CSS 側で止まる。
+// エラー文が「空 → あり」または「別の文」に変わったときだけ揺らす(1.2 秒ごとの再取得では動かさない)。
+function setRunError(message) {
+  const changed = runErrorEl.textContent !== message;
+  runErrorEl.textContent = message;
+  runErrorEl.classList.remove("shake");
+  if (message && changed) {
+    void runErrorEl.offsetWidth;
+    runErrorEl.classList.add("shake");
+  }
+}
+
+// 初回の描画では動かさず、そのあとで増えたものだけに .is-new を付ける(seen = 描画済みの識別子の集合)。
+const seenTodoIds = new Set();
+const seenLogKeys = new Set();
+let todosSeeded = false;
+let logsSeeded = false;
+
 async function postJson(url, body) {
   const res = await fetch(url, {
     method: "POST",
@@ -31,11 +49,18 @@ function renderTodos(todos, activeTodoId, status) {
   todoListEl.innerHTML = "";
   if (todos.length === 0) {
     todoListEl.innerHTML = '<p class="empty-hint">まだTODOがありません。ゴールを入力して分解してください。</p>';
+    todosSeeded = true;
     return;
   }
+  let newCount = 0;
   for (const todo of todos) {
     const card = document.createElement("div");
     card.className = "todo-card" + (todo.todoId === activeTodoId ? " active" : "");
+    if (todosSeeded && !seenTodoIds.has(todo.todoId)) {
+      card.classList.add("is-new");
+      card.style.setProperty("--i", newCount++);
+    }
+    seenTodoIds.add(todo.todoId);
     const info = document.createElement("div");
     info.innerHTML = `<div class="todo-desc">${escapeHtml(todo.description)}</div><div class="todo-done">完了条件: ${escapeHtml(todo.doneCriteria)}</div>`;
     const btn = document.createElement("button");
@@ -43,7 +68,7 @@ function renderTodos(todos, activeTodoId, status) {
     btn.textContent = "実行開始";
     btn.disabled = status === "running";
     btn.onclick = async () => {
-      runErrorEl.textContent = "";
+      setRunError("");
       try {
         await postJson("/api/run/start", {
           todoId: todo.todoId,
@@ -51,13 +76,14 @@ function renderTodos(todos, activeTodoId, status) {
           stallDemo: stallDemoCheckbox.checked,
         });
       } catch (e) {
-        runErrorEl.textContent = e.message;
+        setRunError(e.message);
       }
     };
     card.appendChild(info);
     card.appendChild(btn);
     todoListEl.appendChild(card);
   }
+  todosSeeded = true;
 }
 
 function renderProgress(progress, stepsToWin) {
@@ -70,11 +96,23 @@ function renderLogs(logs, container = logFeedEl, emptyMessage = "まだ実行ロ
   container.innerHTML = "";
   if (logs.length === 0) {
     container.innerHTML = `<p class="empty-hint">${escapeHtml(emptyMessage)}</p>`;
+    if (container === logFeedEl) logsSeeded = true;
     return;
   }
+  // 実行中のログ(logFeedEl)だけ、新しく増えた 1 行を動かす。履歴の詳細表示では動かさない。
+  const isLive = container === logFeedEl;
+  let newCount = 0;
   for (const log of logs) {
     const entry = document.createElement("div");
     entry.className = "log-entry";
+    if (isLive) {
+      const key = `${log.stepIndex}|${log.timestamp}`;
+      if (logsSeeded && !seenLogKeys.has(key)) {
+        entry.classList.add("is-new");
+        entry.style.setProperty("--i", newCount++);
+      }
+      seenLogKeys.add(key);
+    }
 
     const thumb = document.createElement("img");
     thumb.className = "log-thumb";
@@ -94,6 +132,7 @@ function renderLogs(logs, container = logFeedEl, emptyMessage = "まだ実行ロ
     entry.appendChild(body);
     container.appendChild(entry);
   }
+  if (isLive) logsSeeded = true;
 }
 
 // スキルライブラリ(読み取り専用)。追加・削除は管理画面(/admin.html。admin だけ)。
@@ -196,7 +235,7 @@ async function refresh() {
 
   stopBtn.disabled = snapshot.status !== "running";
   if (snapshot.error) {
-    runErrorEl.textContent = snapshot.error;
+    setRunError(snapshot.error);
   }
 
   const historyRes = await fetch("/api/history");
@@ -208,12 +247,12 @@ async function refresh() {
 decomposeBtn.onclick = async () => {
   const goal = goalInput.value.trim();
   if (!goal) return;
-  runErrorEl.textContent = "";
+  setRunError("");
   try {
     await postJson("/api/todo/decompose", { goal });
     await refresh();
   } catch (e) {
-    runErrorEl.textContent = e.message;
+    setRunError(e.message);
   }
 };
 

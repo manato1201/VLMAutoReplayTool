@@ -9,6 +9,17 @@ const skillErrorEl = document.getElementById("skill-error");
 const hidBackendOptionsEl = document.getElementById("hid-backend-options");
 const hidBackendErrorEl = document.getElementById("hid-backend-error");
 
+// エラー文が「空 → あり」または「別の文」に変わったときだけ、1 回きり横に揺らす(動きを減らす設定では CSS 側で止まる)。
+function setError(el, message) {
+  const changed = el.textContent !== message;
+  el.textContent = message;
+  el.classList.remove("shake");
+  if (message && changed) {
+    void el.offsetWidth;
+    el.classList.add("shake");
+  }
+}
+
 async function postJson(url, body) {
   const res = await fetch(url, {
     method: "POST",
@@ -60,12 +71,12 @@ function renderSkills(skills) {
     deleteBtn.className = "btn-delete";
     deleteBtn.textContent = "削除";
     deleteBtn.onclick = async () => {
-      skillErrorEl.textContent = "";
+      setError(skillErrorEl, "");
       try {
         await deleteJson(`/api/skills/${encodeURIComponent(skill.skillId)}`);
         await refresh();
       } catch (e) {
-        skillErrorEl.textContent = e.message;
+        setError(skillErrorEl, e.message);
       }
     };
 
@@ -87,12 +98,12 @@ function renderHidBackendOptions(hidBackend) {
     radio.value = option.name;
     radio.checked = option.name === hidBackend.current;
     radio.onchange = async () => {
-      hidBackendErrorEl.textContent = "";
+      setError(hidBackendErrorEl, "");
       try {
         await postJson("/api/settings/hid-backend", { name: option.name });
         await refresh();
       } catch (e) {
-        hidBackendErrorEl.textContent = e.message;
+        setError(hidBackendErrorEl, e.message);
         await refresh(); // 失敗時も現在の選択状態(ラジオ)を最新化する
       }
     };
@@ -105,7 +116,7 @@ function renderHidBackendOptions(hidBackend) {
     label.appendChild(text);
     hidBackendOptionsEl.appendChild(label);
   }
-  hidBackendErrorEl.textContent = hidBackend.error || "";
+  setError(hidBackendErrorEl, hidBackend.error || "");
 }
 
 async function refresh() {
@@ -118,10 +129,10 @@ async function refresh() {
 addSkillBtn.onclick = async () => {
   const proceduralText = skillProceduralTextEl.value.trim();
   if (!proceduralText) {
-    skillErrorEl.textContent = "手順テキストを入力してください。";
+    setError(skillErrorEl, "手順テキストを入力してください。");
     return;
   }
-  skillErrorEl.textContent = "";
+  setError(skillErrorEl, "");
   try {
     await postJson("/api/skills", {
       gameTitle: skillGameTitleEl.value.trim() || "MyGame",
@@ -131,7 +142,7 @@ addSkillBtn.onclick = async () => {
     skillProceduralTextEl.value = "";
     await refresh();
   } catch (e) {
-    skillErrorEl.textContent = e.message;
+    setError(skillErrorEl, e.message);
   }
 };
 

@@ -36,3 +36,10 @@ def test_keyframes_only_use_transform_and_opacity():
     for m in re.finditer(r"@keyframes ([\w-]+)\s*\{(.*?)\n\}", CSS, re.DOTALL):
         props = set(re.findall(r"([a-z-]+)\s*:", m.group(2)))
         assert props <= {"transform", "opacity"}, (m.group(1), props)
+
+
+def test_new_one_shot_animations_run_once_and_are_short():
+    # エラーの横揺れ・新しい行の入場: どれも 1 回きり・150〜300ms(無限ループは hud-pulse だけ)
+    for sel, name in ((r"\.error-text\.shake", "error-shake"), (r"\.is-new", "item-enter")):
+        m = re.search(sel + r"\s*\{[^}]*animation:\s*" + name + r" (\d+)ms[^;]* 1\b", CSS)
+        assert m and 150 <= int(m.group(1)) <= 300, name
