@@ -7,6 +7,7 @@ name = "vlm-auto-replay-tool"
 version = "0.1.0"
 description = "基盤モデルによる計画と専用モデルによる実行を分離したゲーム自動プレイエージェント(コア骨格実装: Phase1-5)"
 requires-python = ">=3.11"
+license = { file = "LICENSE" }
 dependencies = [
     "pydantic>=2.6",
     "requests>=2.31",
