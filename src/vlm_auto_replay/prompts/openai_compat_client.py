@@ -16,8 +16,10 @@ OpenAI 互換サーバーにつなぐための薄いクライアント。画像�
 from __future__ import annotations
 
 import base64
+import io
 import ipaddress
 import json
+import logging
 import os
 import re
 import time
@@ -30,6 +32,13 @@ from pydantic import BaseModel, TypeAdapter, ValidationError
 
 _LOOPBACK_NAMES = {"localhost"}
 _RETRY_STATUS = {408, 429, 500, 502, 503, 504}
+_log = logging.getLogger(__name__)
+
+#: 画像の最長辺の既定(px)。ローカルの VLM は、画像が大きいほど入力トークンが増えて遅い
+#: (4K の画面全体で約 2000 トークン・約 34 秒。LocalLLMHarness 経由・Qwen3.5-9B の実測 2026-11-21)。
+#: `VLM_LLM_MAX_IMAGE_EDGE` か引数 `max_image_edge` で変える。0 で縮小しない。
+DEFAULT_MAX_IMAGE_EDGE = 1280
+_warned_no_pillow = False
 
 _TASK_INSTRUCTIONS: dict[str, str] = {
     "decompose_goal_to_todo": "達成するために必要な作業を TODO リストに分解してください。",
@@ -97,6 +106,43 @@ def sniff_image_mime(data: bytes) -> str:
     return "image/png"
 
 
+def downscale_image(data: bytes, max_edge: int) -> bytes:
+    """最長辺が max_edge を超える画像を、縦横比を保って縮小したバイト列を返す(JPEG は JPEG、それ以外は PNG)。
+
+    縮小は最適化であって必須ではないので、次のときは**そのまま**返す(失敗にしない):
+    max_edge が 0 以下 / Pillow が無い(`uv sync --extra vision`) / すでに上限以下 / アニメーション / 読めない画像。
+    """
+    global _warned_no_pillow
+    if max_edge <= 0 or not data:
+        return data
+    try:
+        from PIL import Image
+    except ImportError:
+        if not _warned_no_pillow:
+            _warned_no_pillow = True
+            _log.warning("Pillow が無いので、画像を縮小せずに送ります(`uv sync --extra vision` で入ります)。")
+        return data
+    try:
+        with Image.open(io.BytesIO(data)) as img:
+            width, height = img.size
+            if max(width, height) <= max_edge or getattr(img, "is_animated", False):
+                return data
+            scale = max_edge / max(width, height)
+            size = (max(1, round(width * scale)), max(1, round(height * scale)))
+            is_jpeg = img.format == "JPEG"
+            if is_jpeg and img.mode not in ("RGB", "L"):
+                img = img.convert("RGB")
+            resized = img.resize(size, Image.Resampling.LANCZOS)
+            out = io.BytesIO()
+            if is_jpeg:
+                resized.save(out, format="JPEG", quality=90)
+            else:
+                resized.save(out, format="PNG", optimize=True)
+            return out.getvalue()
+    except Exception:  # noqa: BLE001  壊れた画像・巨大すぎる画像など。縮小できなくても、元のまま送れる
+        return data
+
+
 def image_data_uri(data: bytes) -> str:
     return f"data:{sniff_image_mime(data)};base64,{base64.b64encode(data).decode('ascii')}"
 
@@ -111,6 +157,8 @@ class OpenAICompatClient:
         timeout_sec: 1 回の応答待ちの上限(秒)。ローカルの VLM は遅いので既定は長め。
         max_retries: 接続失敗・タイムアウト・429/5xx のときの再試行回数(最初の 1 回は含まない)。
         response_format: ``"json_object"``(既定)または ``"none"``(非対応のサーバー向け)。
+        max_image_edge: 送る画像の最長辺(px)。超える画像は縮小する(既定 1280。0 で縮小しない)。
+            未指定なら環境変数 ``VLM_LLM_MAX_IMAGE_EDGE``。縮小には Pillow が要る(無ければそのまま送る)。
         environ: 環境変数の参照元(テスト用)。
         sleep: 待機関数(テスト用)。
     """
@@ -125,6 +173,7 @@ class OpenAICompatClient:
         max_retries: int = 2,
         backoff_sec: float = 0.5,
         response_format: str = "json_object",
+        max_image_edge: int | None = None,
         environ: Mapping[str, str] | None = None,
         sleep: Callable[[float], None] = time.sleep,
     ):
@@ -142,6 +191,15 @@ class OpenAICompatClient:
         self._backoff = backoff_sec
         self._response_format = response_format
         self._environ = environ if environ is not None else os.environ
+        if max_image_edge is None:
+            raw = self._environ.get("VLM_LLM_MAX_IMAGE_EDGE", "")
+            try:
+                max_image_edge = int(raw) if raw.strip() else DEFAULT_MAX_IMAGE_EDGE
+            except ValueError:
+                raise ValueError(f"VLM_LLM_MAX_IMAGE_EDGE は整数(px)にしてください: {raw!r}") from None
+        if max_image_edge < 0:
+            raise ValueError("max_image_edge は 0 以上にしてください(0 は縮小しない)。")
+        self._max_image_edge = max_image_edge
         self._sleep = sleep
         self._loopback = _is_loopback(urlsplit(self._base_url).hostname or "")
 
@@ -199,7 +257,9 @@ class OpenAICompatClient:
         """1 回の chat/completions を呼び、応答の文字列を返す。"""
         content: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
         for img in images or []:
-            content.append({"type": "image_url", "image_url": {"url": image_data_uri(img)}})
+            content.append(
+                {"type": "image_url", "image_url": {"url": image_data_uri(downscale_image(img, self._max_image_edge))}}
+            )
         messages: list[dict[str, Any]] = []
         if system:
             messages.append({"role": "system", "content": system})
@@ -312,6 +372,7 @@ def client_from_env(environ: Mapping[str, str] | None = None) -> OpenAICompatCli
     VLM_LLM_MODEL       サーバー側のモデル名
     VLM_LLM_API_KEY_ENV キーを入れた環境変数の名前(任意。値そのものは置かない)
     VLM_LLM_TIMEOUT_SEC / VLM_LLM_MAX_RETRIES / VLM_LLM_RESPONSE_FORMAT(json_object|none)
+    VLM_LLM_MAX_IMAGE_EDGE 送る画像の最長辺(px。既定 1280。0 で縮小しない。Pillow が要る)
     """
     env = environ if environ is not None else os.environ
     backend = env.get("VLM_MODEL_BACKEND", "demo").strip().lower()
